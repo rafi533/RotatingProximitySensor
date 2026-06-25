@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rotating Lidar Proximity Sensor — Interceptor Simulation</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #08080d; color: #c0d0e0; font-family: 'Courier New', monospace; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+#header { background: #0b0f18; border-bottom: 1px solid #1a3050; padding: 7px 14px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+#header h1 { font-size: 13px; color: #29b6f6; letter-spacing: 2px; text-transform: uppercase; }
+#status-bar { margin-left: auto; display: flex; gap: 14px; font-size: 10px; }
+.si { display: flex; align-items: center; gap: 5px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: #333; flex-shrink: 0; }
+.dot.on  { background: #00e676; box-shadow: 0 0 5px #00e676; animation: blink .6s ease-in-out infinite alternate; }
+.dot.warn{ background: #ffd600; }
+.dot.hit { background: #ff5252; box-shadow: 0 0 5px #ff5252; animation: blink .2s ease-in-out infinite alternate; }
+@keyframes blink { from{opacity:1}to{opacity:.35} }
+
+#main { display: flex; flex: 1; overflow: hidden; }
+#viewport { flex: 1; position: relative; min-width: 0; }
+canvas#c3d { width: 100%; height: 100%; display: block; }
+
+#resize-handle { width: 5px; flex-shrink: 0; background: #1a3050; cursor: col-resize; transition: background .15s; z-index: 10; }
+#resize-handle:hover, #resize-handle.dragging { background: #29b6f6; }
+#sidebar { width: 300px; flex-shrink: 0; background: #0b0f18; display: flex; flex-direction: column; overflow-y: auto; min-width: 180px; max-width: 600px; }
+.panel { border-bottom: 1px solid #152030; padding: 10px 12px; }
+.ptitle { font-size: 10px; color: #29b6f6; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.ptitle::before { content:''; width:2px; height:11px; background:#29b6f6; display:inline-block; }
+
+.row { display: flex; align-items: center; margin-bottom: 6px; }
+.lbl { font-size: 10px; color: #7a96b0; width: 125px; flex-shrink: 0; line-height: 1.3; }
+.val { font-size: 10px; color: #d0e8ff; width: 38px; text-align: right; flex-shrink: 0; margin-left: 3px; }
+.unit { font-size: 9px; color: #3d6080; width: 26px; flex-shrink: 0; margin-left: 2px; }
+input[type=range] { flex: 1; height: 3px; accent-color: #29b6f6; cursor: pointer; }
+
+select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0d0e0; font-size: 10px; padding: 4px 6px; border-radius: 3px; cursor: pointer; margin-bottom: 6px; font-family: inherit; }
+.slbl { font-size: 10px; color: #7a96b0; margin-bottom: 3px; }
+
+.metric-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; }
+.mbox { background: #080c12; border: 1px solid #1a3050; border-radius: 3px; padding: 6px 4px; text-align: center; }
+.mval { font-size: 15px; color: #29b6f6; font-weight: bold; }
+.mval.g { color: #00e676; }
+.mval.r { color: #ff5252; }
+.mval.y { color: #ffd600; }
+.mlbl { font-size: 8px; color: #3d6080; text-transform: uppercase; letter-spacing: .8px; margin-top: 2px; }
+
+#det-canvas { width: 100%; height: 52px; display: block; background: #050810; border: 1px solid #1a3050; border-radius: 2px; margin-top: 5px; }
+#rng-canvas { width: 100%; height: 70px; display: block; background: #050810; border: 1px solid #1a3050; border-radius: 2px; margin-top: 5px; }
+
+.toggle-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.tbtn { flex: 1; padding: 5px 2px; background: #080c12; border: 1px solid #1a3050; color: #5a7a9a; font-size: 10px; cursor: pointer; border-radius: 3px; text-align: center; transition: all .15s; font-family: inherit; }
+.tbtn.active { background: #0d2040; border-color: #29b6f6; color: #29b6f6; }
+
+.cbtn { width: 100%; padding: 7px; margin-bottom: 5px; background: #0d2040; border: 1px solid #29b6f6; color: #29b6f6; font-size: 11px; cursor: pointer; border-radius: 3px; letter-spacing: 1px; font-family: inherit; transition: all .15s; }
+.cbtn:hover { background: #1a3a60; }
+.cbtn.running { background: #0a2a14; border-color: #00e676; color: #00e676; }
+.cbtn.reset { background: #180808; border-color: #f44336; color: #f44336; }
+
+.chk-row { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.chk-row label { font-size: 10px; color: #7a96b0; cursor: pointer; }
+.chk-row input { accent-color: #29b6f6; cursor: pointer; }
+
+#ov { position: absolute; top: 8px; left: 8px; font-size: 10px; color: #29b6f6; pointer-events: none; line-height: 1.9; background: rgba(5,10,20,.75); padding: 6px 10px; border-radius: 4px; border: 1px solid #1a305033; }
+
+.bar-bg { width: 100%; height: 10px; background: #080c12; border: 1px solid #1a3050; border-radius: 5px; overflow: hidden; margin-top: 3px; }
+.bar-fg { height: 100%; background: linear-gradient(90deg,#1565c0,#00e676); border-radius: 5px; transition: width .2s; }
+
+.stage-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 9px; letter-spacing: 1px; margin-left: 8px; }
+.stage-badge.s1 { background:#1a2a10; border:1px solid #4caf50; color:#4caf50; }
+.stage-badge.s2 { background:#0d1a30; border:1px solid #29b6f6; color:#29b6f6; }
+
+.note { font-size: 9px; color: #3d6080; line-height: 1.6; padding: 5px 6px; background: #050810; border-radius: 3px; border: 1px solid #152030; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>Rotating Lidar Sensor &mdash; Interceptor Simulation</h1>
+  <div id="status-bar">
+    <div class="si"><div class="dot" id="d-sim"></div><span>SIM</span></div>
+    <div class="si"><div class="dot hit" id="d-hit"></div><span>DETECT</span></div>
+    <div class="si"><div class="dot warn" id="d-rod"></div><span>ROD BLOCK</span></div>
+    <div class="si"><div class="dot" id="d-stg"></div><span id="stg-lbl">STAGE 1</span></div>
+  </div>
+</div>
+
+<div id="main">
+<div id="viewport">
+  <canvas id="c3d"></canvas>
+  <div id="ov">
+    <div>t = <span id="ov-t">0.000</span> s</div>
+    <div>Range  <span id="ov-r">---</span> m</div>
+    <div>Beam θ  <span id="ov-a">0.0</span>°</div>
+    <div>Closing <span id="ov-c">---</span> m/s</div>
+    <div>Stage   <span id="ov-s">1 — Fixed</span></div>
+  </div>
+</div>
+
+<div id="resize-handle"></div>
+<div id="sidebar">
+
+  <!-- STAGE -->
+  <div class="panel">
+    <div class="ptitle">Simulation Stage</div>
+    <div class="toggle-row">
+      <div class="tbtn active" data-stage="1">Stage 1<br><span style="font-size:9px;color:#3d6080">Fixed sensor</span></div>
+      <div class="tbtn" data-stage="2">Stage 2<br><span style="font-size:9px;color:#3d6080">Rotating 360°</span></div>
+    </div>
+    <div class="note" id="stage-note">Sensor fixed at mount angle X. FOV cone D covers a sector. Use to evaluate single-position coverage.</div>
+  </div>
+
+  <!-- SENSOR -->
+  <div class="panel">
+    <div class="ptitle">Sensor (4×2×6 cm)</div>
+    <div class="row">
+      <span class="lbl">Mount angle X<br><span style="font-size:9px;color:#3d6080">(from flight axis)</span></span>
+      <input type="range" id="sl-x" min="10" max="80" step="1" value="30">
+      <span class="val" id="vl-x">30</span><span class="unit">deg</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Sensor FOV (D)<br><span style="font-size:9px;color:#3d6080">(full cone angle)</span></span>
+      <input type="range" id="sl-fov" min="5" max="60" step="1" value="20">
+      <span class="val" id="vl-fov">20</span><span class="unit">deg</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Max range</span>
+      <input type="range" id="sl-rng" min="5" max="200" step="5" value="50">
+      <span class="val" id="vl-rng">50</span><span class="unit">m</span>
+    </div>
+    <div style="margin-top:2px; font-size:9px; color:#3d6080;">
+      Detection cone: <span id="info-cone" style="color:#29b6f6">—</span>
+    </div>
+  </div>
+
+  <!-- ROTATION (Stage 2 only) -->
+  <div class="panel" id="panel-rot">
+    <div class="ptitle">Rotation (Stage 2)</div>
+    <div class="row">
+      <span class="lbl">Spin rate</span>
+      <input type="range" id="sl-rpm" min="100" max="6000" step="50" value="1500">
+      <span class="val" id="vl-rpm">1500</span><span class="unit">RPM</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Mount offset φ<br><span style="font-size:9px;color:#3d6080">(azimuth at t=0)</span></span>
+      <input type="range" id="sl-phi0" min="0" max="360" step="5" value="0">
+      <span class="val" id="vl-phi0">0</span><span class="unit">deg</span>
+    </div>
+    <div style="margin-top:2px; font-size:9px; color:#3d6080;">
+      Swept zone: <span id="info-swept" style="color:#29b6f6">—</span>
+    </div>
+  </div>
+
+  <!-- RODS -->
+  <div class="panel">
+    <div class="ptitle">Structural Rods</div>
+    <div class="toggle-row">
+      <div class="tbtn active" data-rods="3">3 Rods</div>
+      <div class="tbtn" data-rods="4">4 Rods</div>
+    </div>
+    <div class="row">
+      <span class="lbl">Rod diameter</span>
+      <input type="range" id="sl-rodd" min="5" max="40" step="1" value="12">
+      <span class="val" id="vl-rodd">12</span><span class="unit">mm</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Rod radius (mount)</span>
+      <input type="range" id="sl-rodr" min="8" max="20" step="1" value="13">
+      <span class="val" id="vl-rodr">13</span><span class="unit">cm</span>
+    </div>
+    <div class="lbl" style="width:100%; margin-bottom:3px;">Angular FOV coverage</div>
+    <div class="bar-bg"><div class="bar-fg" id="cov-bar" style="width:90%"></div></div>
+    <div style="font-size:9px; color:#3d6080; margin-top:3px;"><span id="cov-pct" style="color:#29b6f6">90.0</span>% unobstructed</div>
+  </div>
+
+  <!-- INTERCEPTOR -->
+  <div class="panel">
+    <div class="ptitle">Interceptor</div>
+    <div class="row">
+      <span class="lbl">Speed</span>
+      <input type="range" id="sl-iv" min="50" max="2000" step="10" value="300">
+      <span class="val" id="vl-iv">300</span><span class="unit">m/s</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Body radius</span>
+      <input type="range" id="sl-ir" min="5" max="25" step="1" value="10">
+      <span class="val" id="vl-ir">10</span><span class="unit">cm</span>
+    </div>
+  </div>
+
+  <!-- TARGET -->
+  <div class="panel">
+    <div class="ptitle">Target</div>
+    <div class="row">
+      <span class="lbl">Width (Y)</span>
+      <input type="range" id="sl-tw" min="0.2" max="20" step="0.2" value="5">
+      <span class="val" id="vl-tw">5.0</span><span class="unit">m</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Height (Z)</span>
+      <input type="range" id="sl-th" min="0.2" max="20" step="0.2" value="3">
+      <span class="val" id="vl-th">3.0</span><span class="unit">m</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Depth (X)</span>
+      <input type="range" id="sl-td" min="0.2" max="30" step="0.5" value="8">
+      <span class="val" id="vl-td">8.0</span><span class="unit">m</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Speed</span>
+      <input type="range" id="sl-tv" min="0" max="1500" step="10" value="200">
+      <span class="val" id="vl-tv">200</span><span class="unit">m/s</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Initial range</span>
+      <input type="range" id="sl-tr0" min="10" max="150" step="5" value="60">
+      <span class="val" id="vl-tr0">60</span><span class="unit">m</span>
+    </div>
+  </div>
+
+  <!-- ENGAGEMENT -->
+  <div class="panel">
+    <div class="ptitle">Engagement Scenario</div>
+    <div class="slbl">Relative geometry</div>
+    <select id="sel-sc">
+      <option value="headon">Head-On (closing)</option>
+      <option value="chase">Tail Chase (overtaking)</option>
+      <option value="cross_h">Crossing — Horizontal</option>
+      <option value="cross_v">Crossing — Vertical</option>
+      <option value="cross_45">Crossing — 45° Diagonal</option>
+      <option value="oblique">Oblique — 30° off-axis</option>
+    </select>
+    <div class="row">
+      <span class="lbl">Lateral offset Y</span>
+      <input type="range" id="sl-oy" min="-10" max="10" step="0.5" value="0">
+      <span class="val" id="vl-oy">0.0</span><span class="unit">m</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Lateral offset Z</span>
+      <input type="range" id="sl-oz" min="-10" max="10" step="0.5" value="0">
+      <span class="val" id="vl-oz">0.0</span><span class="unit">m</span>
+    </div>
+    <div class="note" id="sc-note"></div>
+  </div>
+
+  <!-- DISPLAY -->
+  <div class="panel">
+    <div class="ptitle">Display</div>
+    <div class="chk-row"><input type="checkbox" id="chk-fov" checked><label for="chk-fov">Show sensor FOV cone</label></div>
+    <div class="chk-row"><input type="checkbox" id="chk-swept" checked><label for="chk-swept">Show swept volume</label></div>
+    <div class="chk-row"><input type="checkbox" id="chk-rods" checked><label for="chk-rods">Show rods</label></div>
+    <div class="chk-row"><input type="checkbox" id="chk-track" checked><label for="chk-track">Show target track</label></div>
+    <div class="chk-row"><input type="checkbox" id="chk-detray"><label for="chk-detray">Show detection rays</label></div>
+  </div>
+
+  <!-- PERFORMANCE -->
+  <div class="panel">
+    <div class="ptitle">Performance</div>
+    <div class="metric-grid">
+      <div class="mbox"><div class="mval g" id="m-det">0</div><div class="mlbl">Detections</div></div>
+      <div class="mbox"><div class="mval" id="m-rate">0.0</div><div class="mlbl">Det/s</div></div>
+      <div class="mbox"><div class="mval" id="m-duty">0%</div><div class="mlbl">Duty</div></div>
+      <div class="mbox"><div class="mval y" id="m-tti">---</div><div class="mlbl">TTI (s)</div></div>
+      <div class="mbox"><div class="mval" id="m-1st">---</div><div class="mlbl">1st Det (s)</div></div>
+      <div class="mbox"><div class="mval" id="m-cl">---</div><div class="mlbl">Close m/s</div></div>
+    </div>
+    <div style="font-size:9px;color:#3d6080;margin-top:6px;">Detection timeline (last 2 s)</div>
+    <canvas id="det-canvas"></canvas>
+    <div style="font-size:9px;color:#3d6080;margin-top:6px;">Range to target (m)</div>
+    <canvas id="rng-canvas"></canvas>
+  </div>
+
+  <!-- CONTROL -->
+  <div class="panel">
+    <div class="ptitle">Control</div>
+    <button class="cbtn" id="btn-ss">▶  START SIMULATION</button>
+    <button class="cbtn reset" id="btn-rst">↺  RESET</button>
+    <div class="row" style="margin-top:6px;">
+      <span class="lbl">Time scale</span>
+      <input type="range" id="sl-ts" min="0.05" max="5" step="0.05" value="1">
+      <span class="val" id="vl-ts">1.0</span><span class="unit">×</span>
+    </div>
+  </div>
+
+</div><!-- sidebar -->
+</div><!-- main -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════
+const DEG = Math.PI / 180;
+
+function wireSlider(id, vid, dec, cb) {
+  const sl = document.getElementById(id);
+  const vl = document.getElementById(vid);
+  const upd = () => { vl.textContent = parseFloat(sl.value).toFixed(dec); if (cb) cb(); };
+  sl.addEventListener('input', upd);
+  upd();
+}
+
+function P(id) { return parseFloat(document.getElementById(id).value); }
+function El(id) { return document.getElementById(id); }
+
+// ═══════════════════════════════════════════════════════
+//  THREE.JS SETUP
+// ═══════════════════════════════════════════════════════
+const canvas3d = El('c3d');
+const renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setClearColor(0x05080e, 1);
+renderer.shadowMap.enabled = true;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x05080e, 0.006);
+
+const camera = new THREE.PerspectiveCamera(48, 1, 0.01, 500);
+camera.position.set(-14, 10, -12);
+camera.lookAt(5, 0, 8);
+
+scene.add(new THREE.AmbientLight(0x182838, 2));
+const sunLight = new THREE.DirectionalLight(0x4488cc, 1.2);
+sunLight.position.set(-10, 20, 5);
+scene.add(sunLight);
+
+const gridHelper = new THREE.GridHelper(300, 60, 0x0a1a28, 0x0a1a28);
+scene.add(gridHelper);
+
+// ═══════════════════════════════════════════════════════
+//  INTERCEPTOR BODY
+// ═══════════════════════════════════════════════════════
+const interceptorGroup = new THREE.Group();
+scene.add(interceptorGroup);
+
+// We build body parts once; radius-dependent parts rebuilt on change
+let bodyMesh, noseMesh, finMeshes = [], rodMeshes = [];
+
+function buildInterceptorBody() {
+  // Remove old
+  [bodyMesh, noseMesh, ...finMeshes, ...rodMeshes].forEach(m => m && interceptorGroup.remove(m));
+  finMeshes = []; rodMeshes = [];
+
+  const R = P('sl-ir') / 100; // convert cm → m
+  const bodyLen = 2.5;
+
+  const bMat = new THREE.MeshPhongMaterial({ color: 0x1e3a58, shininess: 90, specular: 0x2a5a88 });
+  bodyMesh = new THREE.Mesh(new THREE.CylinderGeometry(R, R, bodyLen, 20), bMat);
+  bodyMesh.rotation.x = Math.PI / 2;
+  interceptorGroup.add(bodyMesh);
+
+  const nMat = new THREE.MeshPhongMaterial({ color: 0x2a5070, shininess: 120 });
+  noseMesh = new THREE.Mesh(new THREE.ConeGeometry(R, 0.6, 16), nMat);
+  noseMesh.rotation.x = -Math.PI / 2;
+  noseMesh.position.z = bodyLen / 2 + 0.3;
+  interceptorGroup.add(noseMesh);
+
+  // Fins
+  const fMat = new THREE.MeshPhongMaterial({ color: 0x102030 });
+  for (let i = 0; i < 4; i++) {
+    const ang = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.3, 0.5), fMat);
+    fin.position.set(Math.cos(ang) * (R + 0.15), Math.sin(ang) * (R + 0.15), -0.9);
+    fin.rotation.z = ang;
+    interceptorGroup.add(fin);
+    finMeshes.push(fin);
+  }
+
+  // Mount ring at sensor location
+  const ringMat = new THREE.MeshPhongMaterial({ color: 0x00a0d0, emissive: 0x004060 });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(R + 0.015, 0.01, 8, 24), ringMat);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.z = 1.0; // sensor z position on body
+  interceptorGroup.add(ring);
+
+  buildRods();
+}
+
+// ═══════════════════════════════════════════════════════
+//  STRUCTURAL RODS
+// ═══════════════════════════════════════════════════════
+let numRods = 3;
+
+function buildRods() {
+  rodMeshes.forEach(m => interceptorGroup.remove(m));
+  rodMeshes = [];
+  if (!El('chk-rods').checked) return;
+
+  const R_mount = P('sl-rodr') / 100;
+  const r_rod   = P('sl-rodd') / 1000 / 2;
+  const rodMat  = new THREE.MeshPhongMaterial({ color: 0x4a6070, shininess: 60 });
+  const rodLen  = 2.0;
+
+  for (let i = 0; i < numRods; i++) {
+    const ang = (i / numRods) * Math.PI * 2;
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(r_rod, r_rod, rodLen, 8), rodMat);
+    rod.rotation.x = Math.PI / 2;
+    rod.position.set(Math.cos(ang) * R_mount, Math.sin(ang) * R_mount, 0.0);
+    interceptorGroup.add(rod);
+    rodMeshes.push(rod);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  SENSOR GROUP
+// ═══════════════════════════════════════════════════════
+// sensorRotGroup rotates around Z at rpm (stage 2)
+// inside: sensorPivotGroup — oriented so its +Z = boresight direction
+//         contains: sensor box, lenses, fov cone
+const sensorRotGroup = new THREE.Group();
+interceptorGroup.add(sensorRotGroup);
+
+const sensorPivotGroup = new THREE.Group();
+sensorRotGroup.add(sensorPivotGroup);
+
+let sensorBoxMesh, lens1, lens2, fovConeMesh, fovRimMesh;
+let sweptMesh = null;
+
+// Sensor body is modeled as 4cm(X) × 2cm(Y) × 6cm(Z) in local space
+// Local +Z = boresight (direction lenses face)
+// We exaggerate for visibility: ×4 → 8cm × 4cm × 12cm  (visual only)
+const SX = 0.08, SY = 0.04, SZ = 0.12;
+
+function buildSensorMesh() {
+  if (sensorBoxMesh) sensorPivotGroup.remove(sensorBoxMesh);
+  if (lens1) sensorPivotGroup.remove(lens1);
+  if (lens2) sensorPivotGroup.remove(lens2);
+
+  const sMat = new THREE.MeshPhongMaterial({ color: 0x203040, shininess: 80 });
+  sensorBoxMesh = new THREE.Mesh(new THREE.BoxGeometry(SX, SY, SZ), sMat);
+  sensorPivotGroup.add(sensorBoxMesh);
+
+  // Two lenses on front face (local +Z face)
+  const lMat1 = new THREE.MeshPhongMaterial({ color: 0xff4444, emissive: 0x660000 }); // laser
+  const lMat2 = new THREE.MeshPhongMaterial({ color: 0x88aaff, emissive: 0x223366 }); // receiver
+  const lR = 0.012;
+  lens1 = new THREE.Mesh(new THREE.CylinderGeometry(lR, lR, 0.008, 12), lMat1);
+  lens1.rotation.x = Math.PI / 2;
+  lens1.position.set(-SX * 0.2, 0, SZ / 2 + 0.004);
+  sensorPivotGroup.add(lens1);
+
+  lens2 = new THREE.Mesh(new THREE.CylinderGeometry(lR, lR, 0.008, 12), lMat2);
+  lens2.rotation.x = Math.PI / 2;
+  lens2.position.set(SX * 0.2, 0, SZ / 2 + 0.004);
+  sensorPivotGroup.add(lens2);
+}
+
+function buildFovCone() {
+  if (fovConeMesh) sensorPivotGroup.remove(fovConeMesh);
+  if (fovRimMesh)  sensorPivotGroup.remove(fovRimMesh);
+  fovConeMesh = null; fovRimMesh = null;
+  if (!El('chk-fov').checked) return;
+
+  const D = P('sl-fov') * DEG;
+  const half = D / 2;
+  const L = P('sl-rng');
+  const r = Math.tan(half) * L;
+
+  const geo = new THREE.ConeGeometry(r, L, 48, 1, true);
+  geo.translate(0, -L / 2, 0);
+  geo.rotateX(-Math.PI / 2); // apex at origin, cone extends along +Z
+
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x00c8ff, transparent: true, opacity: 0.07,
+    side: THREE.DoubleSide, depthWrite: false
+  });
+  fovConeMesh = new THREE.Mesh(geo, mat);
+  // Offset apex to front face of sensor box
+  fovConeMesh.position.z = SZ / 2;
+  sensorPivotGroup.add(fovConeMesh);
+
+  // Cone wireframe rim
+  const rimGeo = new THREE.RingGeometry(r - 0.05, r + 0.05, 48);
+  rimGeo.rotateX(Math.PI / 2);
+  const rimMat = new THREE.MeshBasicMaterial({ color: 0x00c8ff, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
+  fovRimMesh = new THREE.Mesh(rimGeo, rimMat);
+  fovRimMesh.position.z = SZ / 2 + L;
+  sensorPivotGroup.add(fovRimMesh);
+}
+
+function buildSweptVolume() {
+  if (sweptMesh) { scene.remove(sweptMesh); sweptMesh = null; }
+  clearSweptOutlines();
+  if (!El('chk-swept').checked) return;
+  if (simStage !== 2) return;
+
+  const X = P('sl-x') * DEG;
+  const D = P('sl-fov') * DEG;
+  const L = P('sl-rng');
+
+  const innerAngle = Math.max(0, X - D / 2);
+  const outerAngle = Math.min(Math.PI / 2, X + D / 2);
+
+  // Build a custom geometry for the annular cone swept volume
+  const N = 64;
+  const positions = [];
+  const indices = [];
+
+  // Two circles: inner cone edge and outer cone edge, both at distance L from origin
+  for (let i = 0; i <= N; i++) {
+    const phi = (i / N) * Math.PI * 2;
+    const cp = Math.cos(phi), sp = Math.sin(phi);
+
+    // Outer cone circle (at L from sensor area origin, approx at interceptor Z=1.0)
+    const rOuter = Math.sin(outerAngle) * L;
+    const zOuter = Math.cos(outerAngle) * L;
+    positions.push(rOuter * cp, rOuter * sp, zOuter);  // outer
+
+    const rInner = Math.sin(innerAngle) * L;
+    const zInner = Math.cos(innerAngle) * L;
+    positions.push(rInner * cp, rInner * sp, zInner);  // inner
+  }
+
+  // Also add apex (index = 2*(N+1) ... )
+  // Triangulate: side panels between outer circle and inner circle
+  for (let i = 0; i < N; i++) {
+    const a = i * 2, b = i * 2 + 1, c = (i + 1) * 2, d = (i + 1) * 2 + 1;
+    indices.push(a, b, c);
+    indices.push(b, d, c);
+  }
+
+  // Outer cone surface (outer ring → apex at origin)
+  const apexIdx = (N + 1) * 2;
+  positions.push(0, 0, 0); // apex at interceptor nose area
+  for (let i = 0; i < N; i++) {
+    const a = i * 2, b = (i + 1) * 2;
+    indices.push(apexIdx, b, a);
+  }
+  // Inner cone surface
+  const apex2Idx = apexIdx + 1;
+  positions.push(0, 0, 0);
+  for (let i = 0; i < N; i++) {
+    const a = i * 2 + 1, b = (i + 1) * 2 + 1;
+    indices.push(apex2Idx, a, b);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x0080ff, transparent: true, opacity: 0.05,
+    side: THREE.DoubleSide, depthWrite: false
+  });
+  sweptMesh = new THREE.Mesh(geo, mat);
+  sweptMesh.position.z = 1.0; // sensor Z on interceptor
+  scene.add(sweptMesh);
+
+  // Outline rings at max range
+  for (let ring = 0; ring < 2; ring++) {
+    const ang = ring === 0 ? outerAngle : innerAngle;
+    if (ang < 0.01) continue;
+    const r = Math.sin(ang) * L;
+    const z = Math.cos(ang) * L;
+    const rGeo = new THREE.BufferGeometry().setFromPoints(
+      Array.from({length: N + 1}, (_, i) => {
+        const φ = (i / N) * Math.PI * 2;
+        return new THREE.Vector3(r * Math.cos(φ), r * Math.sin(φ), z);
+      })
+    );
+    const rLine = new THREE.Line(rGeo, new THREE.LineBasicMaterial({
+      color: ring === 0 ? 0x0080ff : 0x004088, transparent: true, opacity: 0.35
+    }));
+    rLine.position.z = 1.0;
+    scene.add(rLine);
+    sweptOutlines.push(rLine);
+  }
+}
+
+let sweptOutlines = [];
+function clearSweptOutlines() {
+  sweptOutlines.forEach(l => scene.remove(l));
+  sweptOutlines = [];
+}
+
+// ═══════════════════════════════════════════════════════
+//  SENSOR ORIENTATION UPDATE
+// ═══════════════════════════════════════════════════════
+// sensorPivotGroup is placed on the side of the body, boresight at angle X
+function updateSensorPose(rotAngle) {
+  const X = P('sl-x') * DEG;
+  const R_body = P('sl-ir') / 100;
+  const R_mount = R_body + SX / 2 + 0.005; // body surface + half sensor width
+
+  // sensorRotGroup just rotates around Z (interceptor axis)
+  sensorRotGroup.rotation.z = rotAngle;
+
+  // sensorPivotGroup: translate to side of body, then tilt boresight by X
+  // In sensorRotGroup's local frame, the sensor is at (R_mount, 0, 1.0)
+  // Boresight should point in direction (sin(X), 0, cos(X)) in that frame
+  sensorPivotGroup.position.set(R_mount, 0, 1.0);
+  // The sensor box local +Z = boresight. We need to rotate so local +Z → (sin(X), 0, cos(X))
+  // That's a rotation around local Y by -X (tilting forward)
+  // But we're in sensorRotGroup space where X-axis is radial.
+  // Boresight in sensorRotGroup local: (sin(X), 0, cos(X))
+  // Local sensor +Z needs to map to (sin(X), 0, cos(X))
+  // Rotation: from (0,0,1) to (sin(X), 0, cos(X)) = rotation around Y by X
+  sensorPivotGroup.rotation.set(0, X, 0);
+}
+
+// Get world-space sensor origin and boresight direction
+function getSensorWorld(rotAngle) {
+  updateSensorPose(rotAngle);
+  // Force matrix update
+  interceptorGroup.updateMatrixWorld(true);
+
+  // Front face center of sensor in world space
+  const localFront = new THREE.Vector3(0, 0, SZ / 2);
+  const worldFront = localFront.clone().applyMatrix4(sensorPivotGroup.matrixWorld);
+
+  // Boresight = sensorPivotGroup's world +Z direction
+  const worldBore = new THREE.Vector3(0, 0, 1).transformDirection(sensorPivotGroup.matrixWorld).normalize();
+
+  return { origin: worldFront, boresight: worldBore };
+}
+
+// ═══════════════════════════════════════════════════════
+//  TARGET
+// ═══════════════════════════════════════════════════════
+const targetGroup = new THREE.Group();
+scene.add(targetGroup);
+let tBoxMesh, tEdgeMesh;
+
+function buildTarget() {
+  if (tBoxMesh) targetGroup.remove(tBoxMesh);
+  if (tEdgeMesh) targetGroup.remove(tEdgeMesh);
+  const tw = P('sl-tw'), th = P('sl-th'), td = P('sl-td');
+  const geo = new THREE.BoxGeometry(td, th, tw);
+  tBoxMesh = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({ color: 0x8b0000, transparent: true, opacity: 0.55, shininess: 40 }));
+  targetGroup.add(tBoxMesh);
+  tEdgeMesh = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0xff3333 }));
+  targetGroup.add(tEdgeMesh);
+}
+
+// Track line
+let trackLine = null;
+const trackPts = [];
+
+function addTrackPt(p) {
+  if (!El('chk-track').checked) return;
+  if (trackPts.length === 0 || p.distanceTo(new THREE.Vector3(...trackPts[trackPts.length-1])) > 0.4) {
+    trackPts.push([p.x, p.y, p.z]);
+    if (trackPts.length > 600) trackPts.shift();
+    if (trackLine) scene.remove(trackLine);
+    const geo = new THREE.BufferGeometry().setFromPoints(trackPts.map(pt => new THREE.Vector3(...pt)));
+    trackLine = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xff3333, transparent: true, opacity: 0.35 }));
+    scene.add(trackLine);
+  }
+}
+
+// Detection rays (visual)
+const detRays = [];
+function addDetRay(from, to) {
+  if (!El('chk-detray').checked) return;
+  const geo = new THREE.BufferGeometry().setFromPoints([from, to]);
+  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.8 }));
+  scene.add(line);
+  detRays.push({ line, born: simTime });
+}
+function pruneDetRays() {
+  const age = 0.15;
+  for (let i = detRays.length - 1; i >= 0; i--) {
+    if (simTime - detRays[i].born > age) { scene.remove(detRays[i].line); detRays.splice(i, 1); }
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  ROD OCCLUSION (geometric)
+// ═══════════════════════════════════════════════════════
+// Returns true if the segment from 'from' to 'to' passes within r_rod of any rod axis
+function isOccludedByRod(from, to) {
+  const R_mount = P('sl-rodr') / 100;
+  const r_rod   = P('sl-rodd') / 1000 / 2;
+
+  const dir = new THREE.Vector3().subVectors(to, from);
+  const tgt_dist = dir.length();
+  dir.divideScalar(tgt_dist);
+
+  for (let i = 0; i < numRods; i++) {
+    const ang = (i / numRods) * Math.PI * 2;
+    const cx = Math.cos(ang) * R_mount;
+    const cy = Math.sin(ang) * R_mount;
+
+    // 2D distance from ray to vertical cylinder at (cx, cy)
+    const ox = from.x - cx, oy = from.y - cy;
+    const dx = dir.x, dy = dir.y;
+    const dLen2 = dx * dx + dy * dy;
+    if (dLen2 < 1e-8) continue; // ray nearly parallel to cylinder (along Z)
+
+    // Quadratic: find t where ray is closest to cylinder axis in XY
+    const A = dLen2;
+    const B = 2 * (ox * dx + oy * dy);
+    const C = ox * ox + oy * oy - r_rod * r_rod;
+    const disc = B * B - 4 * A * C;
+    if (disc < 0) continue;
+
+    const sqrtDisc = Math.sqrt(disc);
+    const t1 = (-B - sqrtDisc) / (2 * A);
+    const t2 = (-B + sqrtDisc) / (2 * A);
+
+    // Intersection must be between sensor and target
+    if (t2 < 0.01 || t1 > tgt_dist) continue;
+    return true;
+  }
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════
+//  DETECTION: cone-box test
+// ═══════════════════════════════════════════════════════
+// Sample 15 points on target box (corners + face centers + center)
+function getTargetSamplePoints() {
+  const tw = P('sl-tw'), th = P('sl-th'), td = P('sl-td');
+  const hx = td / 2, hy = th / 2, hz = tw / 2;
+  const c = targetGroup.position;
+  const pts = [];
+  for (const sx of [-1, 0, 1]) for (const sy of [-1, 0, 1]) for (const sz of [-1, 0, 1]) {
+    if (Math.abs(sx) + Math.abs(sy) + Math.abs(sz) >= 1) // corners + face centers
+      pts.push(new THREE.Vector3(c.x + sx * hx, c.y + sy * hy, c.z + sz * hz));
+  }
+  return pts;
+}
+
+function checkDetection(sensorOrigin, boresight) {
+  const D_half = (P('sl-fov') / 2) * DEG;
+  const maxR = P('sl-rng');
+  const pts = getTargetSamplePoints();
+  let detected = false, rodBlocked = false;
+  let closestPt = null, closestDist = Infinity;
+
+  for (const pt of pts) {
+    const v = new THREE.Vector3().subVectors(pt, sensorOrigin);
+    const dist = v.length();
+    if (dist > maxR) continue;
+
+    const angle = Math.acos(Math.max(-1, Math.min(1, v.dot(boresight) / dist)));
+    if (angle > D_half) continue;
+
+    // Within FOV cone — check rod occlusion
+    if (isOccludedByRod(sensorOrigin, pt)) { rodBlocked = true; continue; }
+
+    detected = true;
+    if (dist < closestDist) { closestDist = dist; closestPt = pt.clone(); }
+  }
+
+  return { detected, rodBlocked, closestPt, closestDist };
+}
+
+// ═══════════════════════════════════════════════════════
+//  SIMULATION STATE
+// ═══════════════════════════════════════════════════════
+let simRunning = false;
+let simTime = 0;
+let simStage = 1;
+let sensorRotAngle = 0;
+let targetVel = new THREE.Vector3();
+let lastT = null;
+
+// History buffers
+const H = 400, H_SECS = 2;
+let detHist  = new Float32Array(H);
+let rngHist  = new Float32Array(H);
+let histIdx  = 0;
+let histTimer = 0;
+const H_DT = H_SECS / H;
+
+let totalDet = 0, detFrames = 0, totalFrames = 0;
+let firstDetT = null;
+let prevRange = null, curRange = null;
+
+function resetSim() {
+  simTime = 0; sensorRotAngle = 0;
+  totalDet = 0; detFrames = 0; totalFrames = 0;
+  firstDetT = null; prevRange = null; curRange = null;
+  detHist.fill(0); rngHist.fill(0);
+  histIdx = 0; histTimer = 0;
+
+  trackPts.length = 0;
+  if (trackLine) { scene.remove(trackLine); trackLine = null; }
+  detRays.forEach(r => scene.remove(r.line)); detRays.length = 0;
+  clearSweptOutlines();
+  if (sweptMesh) { scene.remove(sweptMesh); sweptMesh = null; }
+
+  // Set target initial position and velocity
+  const R0 = P('sl-tr0');
+  const iV  = P('sl-iv');
+  const tV  = P('sl-tv');
+  const offY = P('sl-oy'), offZ = P('sl-oz');
+  const sc = El('sel-sc').value;
+
+  // Interceptor moves in +Z, stays at world origin in intercept frame
+  // Target is placed relative to it
+  switch (sc) {
+    case 'headon':
+      targetGroup.position.set(offY, offZ, R0);
+      targetVel.set(0, 0, -(iV + tV));
+      break;
+    case 'chase':
+      targetGroup.position.set(offY, offZ, R0);
+      targetVel.set(0, 0, -(iV - tV));
+      break;
+    case 'cross_h':
+      targetGroup.position.set(-R0 * 0.5, offZ, R0 * 0.8);
+      targetVel.set(tV, 0, -iV);
+      break;
+    case 'cross_v':
+      targetGroup.position.set(offY, -R0 * 0.5, R0 * 0.8);
+      targetVel.set(0, tV, -iV);
+      break;
+    case 'cross_45':
+      targetGroup.position.set(-R0 * 0.4, -R0 * 0.4, R0 * 0.8);
+      targetVel.set(tV * 0.707, tV * 0.707, -iV);
+      break;
+    case 'oblique':
+      targetGroup.position.set(offY, offZ, R0);
+      targetVel.set(tV * Math.sin(30 * DEG), 0, -(iV + tV * Math.cos(30 * DEG)));
+      break;
+  }
+
+  updateScenarioNote();
+  updateCoverageBar();
+  updateInfoLabels();
+  buildTarget();
+  buildSensorMesh();
+  buildFovCone();
+  buildSweptVolume();
+  updateSensorPose(0);
+
+  El('m-det').textContent = '0';
+  El('m-rate').textContent = '0.0';
+  El('m-duty').textContent = '0%';
+  El('m-tti').textContent = '---';
+  El('m-1st').textContent = '---';
+  El('m-cl').textContent = '---';
+  El('ov-t').textContent = '0.000';
+  El('ov-r').textContent = '---';
+  El('ov-c').textContent = '---';
+}
+
+// ═══════════════════════════════════════════════════════
+//  SIMULATION STEP
+// ═══════════════════════════════════════════════════════
+function simStep(dt) {
+  // Advance target
+  targetGroup.position.addScaledVector(targetVel, dt);
+  simTime += dt;
+  totalFrames++;
+
+  // Advance sensor rotation (stage 2 only)
+  if (simStage === 2) {
+    const omega = (P('sl-rpm') / 60) * 2 * Math.PI;
+    sensorRotAngle += omega * dt;
+  }
+
+  // Initial phi offset (stage 1: fixed)
+  const phiOffset = simStage === 1 ? P('sl-phi0') * DEG : 0;
+  const rotAngle  = simStage === 1 ? phiOffset : sensorRotAngle + phiOffset;
+
+  // Update sensor pose and get world position/direction
+  const { origin, boresight } = getSensorWorld(rotAngle);
+
+  // Detection test
+  const { detected, rodBlocked, closestPt } = checkDetection(origin, boresight);
+
+  if (detected) {
+    totalDet++;
+    detFrames++;
+    if (firstDetT === null) firstDetT = simTime;
+    if (closestPt) addDetRay(origin, closestPt);
+  }
+
+  prevRange = curRange;
+  curRange = targetGroup.position.distanceTo(origin);
+
+  // History
+  histTimer += dt;
+  while (histTimer >= H_DT) {
+    histTimer -= H_DT;
+    detHist[histIdx % H] = detected ? 1 : (rodBlocked ? 0.5 : 0);
+    rngHist[histIdx % H] = curRange;
+    histIdx++;
+  }
+
+  pruneDetRays();
+
+  // Update overlays and metrics
+  const closingSpd = prevRange !== null && dt > 0 ? (prevRange - curRange) / dt : 0;
+  El('ov-t').textContent = simTime.toFixed(3);
+  El('ov-r').textContent = curRange.toFixed(2);
+  El('ov-a').textContent = ((rotAngle * 180 / Math.PI) % 360).toFixed(1);
+  El('ov-c').textContent = closingSpd.toFixed(1);
+
+  El('m-det').textContent = totalDet;
+  El('m-rate').textContent = (totalDet / Math.max(simTime, 0.001)).toFixed(1);
+  El('m-duty').textContent = ((detFrames / totalFrames) * 100).toFixed(1) + '%';
+  El('m-cl').textContent = closingSpd.toFixed(0);
+  if (firstDetT !== null) El('m-1st').textContent = firstDetT.toFixed(3);
+  if (closingSpd > 0.5) El('m-tti').textContent = (curRange / closingSpd).toFixed(2);
+
+  El('d-hit').className = 'dot' + (detected ? ' hit' : '');
+  El('d-rod').className = 'dot' + (rodBlocked && !detected ? ' warn' : '');
+  El('d-sim').className = 'dot on';
+
+  drawPlots();
+
+  // Stop at very close range
+  if (curRange < 0.3) {
+    simRunning = false;
+    El('btn-ss').textContent = '▶  START SIMULATION';
+    El('btn-ss').className = 'cbtn';
+    El('d-sim').className = 'dot';
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  PLOTS
+// ═══════════════════════════════════════════════════════
+function drawPlots() {
+  const dc = El('det-canvas'), rc = El('rng-canvas');
+  const dctx = dc.getContext('2d'), rctx = rc.getContext('2d');
+  const dw = dc.width, dh = dc.height;
+  const rw = rc.width, rh = rc.height;
+
+  dctx.clearRect(0, 0, dw, dh);
+  const bw = dw / H;
+  for (let i = 0; i < H; i++) {
+    const age = (histIdx - H + i + H) % H;
+    const v = detHist[age];
+    if (v === 0) continue;
+    dctx.fillStyle = v === 1 ? '#00e676' : '#444455';
+    dctx.fillRect(i * bw, 0, Math.max(1, bw), dh);
+  }
+  // Border line
+  dctx.strokeStyle = '#1a3050'; dctx.lineWidth = 1;
+  dctx.strokeRect(0, 0, dw, dh);
+  dctx.fillStyle = '#2a4060'; dctx.font = '8px monospace';
+  dctx.fillText('─2s', 2, dh - 2); dctx.fillText('now', dw - 22, dh - 2);
+
+  rctx.clearRect(0, 0, rw, rh);
+  const maxRng = P('sl-rng') * 2;
+  rctx.strokeStyle = '#29b6f6'; rctx.lineWidth = 1.5;
+  rctx.beginPath();
+  for (let i = 0; i < H; i++) {
+    const age = (histIdx - H + i + H) % H;
+    const r = rngHist[age];
+    const x = (i / H) * rw;
+    const y = rh - (r / maxRng) * rh;
+    i === 0 ? rctx.moveTo(x, y) : rctx.lineTo(x, y);
+  }
+  rctx.stroke();
+  // Max range dashed line
+  const maxY = rh - (P('sl-rng') / maxRng) * rh;
+  rctx.strokeStyle = '#1a3050'; rctx.lineWidth = 1; rctx.setLineDash([3, 3]);
+  rctx.beginPath(); rctx.moveTo(0, maxY); rctx.lineTo(rw, maxY); rctx.stroke();
+  rctx.setLineDash([]);
+  rctx.fillStyle = '#2a4060'; rctx.font = '8px monospace';
+  rctx.fillText('max', 2, maxY - 2);
+}
+
+// ═══════════════════════════════════════════════════════
+//  UI HELPERS
+// ═══════════════════════════════════════════════════════
+function updateCoverageBar() {
+  // Angular coverage: approximate rod shadowing in rotation plane
+  const rodWidthApprox = (P('sl-rodd') / 1000 / 2) / (P('sl-rodr') / 100) * 2; // angular diameter (rad)
+  const blockedDeg = numRods * rodWidthApprox * 180 / Math.PI;
+  const pct = Math.max(0, Math.min(100, 100 - blockedDeg / 360 * 100));
+  El('cov-bar').style.width = pct + '%';
+  El('cov-pct').textContent = pct.toFixed(1);
+}
+
+function updateInfoLabels() {
+  const X = P('sl-x'), D = P('sl-fov'), R = P('sl-rng');
+  const innerH = Math.max(0, X - D / 2), outerH = X + D / 2;
+  El('info-cone').textContent = `${D}° full angle, half=${D/2}°, reaches ${R}m`;
+  El('info-swept').textContent = `Annular zone ${innerH.toFixed(0)}°–${outerH.toFixed(0)}° from axis`;
+}
+
+function updateScenarioNote() {
+  const iV = P('sl-iv'), tV = P('sl-tv');
+  const sc = El('sel-sc').value;
+  const notes = {
+    headon:  `Target closing head-on. Combined closing: ${(iV+tV).toFixed(0)} m/s`,
+    chase:   `Tail chase. Overtake speed: ${(iV-tV).toFixed(0)} m/s`,
+    cross_h: `Horizontal crossing. Relative: ~${Math.hypot(iV,tV).toFixed(0)} m/s`,
+    cross_v: `Vertical crossing. Relative: ~${Math.hypot(iV,tV).toFixed(0)} m/s`,
+    cross_45:`45° diagonal crossing. Relative: ~${Math.hypot(iV,tV).toFixed(0)} m/s`,
+    oblique: `30° oblique approach. Relative: ~${Math.hypot(iV,tV).toFixed(0)} m/s`,
+  };
+  El('sc-note').textContent = notes[sc] || '';
+}
+
+function updateStageUI() {
+  const isS2 = simStage === 2;
+  El('d-stg').className = 'dot' + (isS2 ? ' on' : ' warn');
+  El('stg-lbl').textContent = isS2 ? 'STAGE 2' : 'STAGE 1';
+  El('ov-s').textContent = isS2 ? '2 — Rotating' : '1 — Fixed';
+  El('stage-note').textContent = isS2
+    ? 'Sensor rotates at set RPM around flight axis, sweeping full 360°. Shows torus-shaped detection volume.'
+    : 'Sensor fixed at mount angle X and azimuth φ₀. FOV cone D covers a sector. Evaluate single-position coverage.';
+  El('panel-rot').style.opacity = isS2 ? '1' : '0.4';
+  clearSweptOutlines();
+  if (sweptMesh) { scene.remove(sweptMesh); sweptMesh = null; }
+  buildSweptVolume();
+}
+
+// ═══════════════════════════════════════════════════════
+//  ORBIT CAMERA
+// ═══════════════════════════════════════════════════════
+let drag = false, prevMx = 0, prevMy = 0;
+let sph = { th: -0.6, ph: 0.85, r: 30 };
+const camTarget = new THREE.Vector3(4, 0, 8);
+
+canvas3d.addEventListener('mousedown', e => { drag = true; prevMx = e.clientX; prevMy = e.clientY; });
+canvas3d.addEventListener('mouseup',   () => drag = false);
+canvas3d.addEventListener('mouseleave',() => drag = false);
+canvas3d.addEventListener('mousemove', e => {
+  if (!drag) return;
+  sph.th -= (e.clientX - prevMx) * 0.005;
+  sph.ph  = Math.max(0.08, Math.min(Math.PI - 0.08, sph.ph - (e.clientY - prevMy) * 0.005));
+  prevMx = e.clientX; prevMy = e.clientY;
+});
+canvas3d.addEventListener('wheel', e => {
+  sph.r = Math.max(1.5, Math.min(250, sph.r * (1 + e.deltaY * 0.001)));
+  e.preventDefault();
+}, { passive: false });
+
+function updateCamera() {
+  camera.position.set(
+    camTarget.x + sph.r * Math.sin(sph.ph) * Math.sin(sph.th),
+    camTarget.y + sph.r * Math.cos(sph.ph),
+    camTarget.z + sph.r * Math.sin(sph.ph) * Math.cos(sph.th)
+  );
+  camera.lookAt(camTarget);
+}
+
+// ═══════════════════════════════════════════════════════
+//  RESIZE
+// ═══════════════════════════════════════════════════════
+function resize() {
+  const vp = El('viewport');
+  renderer.setSize(vp.clientWidth, vp.clientHeight);
+  camera.aspect = vp.clientWidth / vp.clientHeight;
+  camera.updateProjectionMatrix();
+
+  for (const id of ['det-canvas', 'rng-canvas']) {
+    const cv = El(id);
+    cv.width  = cv.clientWidth  || 260;
+    cv.height = cv.clientHeight || (id === 'det-canvas' ? 52 : 70);
+  }
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ═══════════════════════════════════════════════════════
+//  RENDER LOOP
+// ═══════════════════════════════════════════════════════
+function animate(ts) {
+  requestAnimationFrame(animate);
+
+  if (simRunning && lastT !== null) {
+    let dt = Math.min((ts - lastT) / 1000 * P('sl-ts'), 0.05);
+    simStep(dt);
+  }
+  lastT = ts;
+
+  // Gentle lens pulse
+  if (lens1) lens1.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(Date.now() * 0.01);
+
+  updateCamera();
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(animate);
+
+// ═══════════════════════════════════════════════════════
+//  WIRE UP CONTROLS
+// ═══════════════════════════════════════════════════════
+wireSlider('sl-x',    'vl-x',    0, () => { buildFovCone(); buildSweptVolume(); updateInfoLabels(); if (!simRunning) updateSensorPose(P('sl-phi0')*DEG); });
+wireSlider('sl-fov',  'vl-fov',  0, () => { buildFovCone(); buildSweptVolume(); updateInfoLabels(); });
+wireSlider('sl-rng',  'vl-rng',  0, () => { buildFovCone(); buildSweptVolume(); updateInfoLabels(); });
+wireSlider('sl-rpm',  'vl-rpm',  0, updateInfoLabels);
+wireSlider('sl-phi0', 'vl-phi0', 0, () => { if (!simRunning) updateSensorPose(P('sl-phi0')*DEG); });
+wireSlider('sl-rodd', 'vl-rodd', 0, () => { buildRods(); updateCoverageBar(); });
+wireSlider('sl-rodr', 'vl-rodr', 0, () => { buildRods(); updateCoverageBar(); });
+wireSlider('sl-iv',   'vl-iv',   0, updateScenarioNote);
+wireSlider('sl-ir',   'vl-ir',   0, buildInterceptorBody);
+wireSlider('sl-tv',   'vl-tv',   0, updateScenarioNote);
+wireSlider('sl-tw',   'vl-tw',   1, buildTarget);
+wireSlider('sl-th',   'vl-th',   1, buildTarget);
+wireSlider('sl-td',   'vl-td',   1, buildTarget);
+wireSlider('sl-tr0',  'vl-tr0',  0);
+wireSlider('sl-oy',   'vl-oy',   1);
+wireSlider('sl-oz',   'vl-oz',   1);
+wireSlider('sl-ts',   'vl-ts',   1);
+
+El('sel-sc').addEventListener('change', () => { updateScenarioNote(); if (!simRunning) resetSim(); });
+
+document.querySelectorAll('[data-stage]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-stage]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    simStage = parseInt(btn.dataset.stage);
+    updateStageUI();
+    if (!simRunning) resetSim();
+  });
+});
+
+document.querySelectorAll('[data-rods]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-rods]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    numRods = parseInt(btn.dataset.rods);
+    buildRods(); updateCoverageBar();
+  });
+});
+
+El('chk-fov').addEventListener('change',   buildFovCone);
+El('chk-swept').addEventListener('change', () => { clearSweptOutlines(); buildSweptVolume(); });
+El('chk-rods').addEventListener('change',  buildRods);
+El('chk-track').addEventListener('change', () => { if (!El('chk-track').checked && trackLine) { scene.remove(trackLine); trackLine = null; } });
+
+El('btn-ss').addEventListener('click', () => {
+  simRunning = !simRunning;
+  El('btn-ss').textContent = simRunning ? '⏸  PAUSE' : '▶  RESUME';
+  El('btn-ss').className   = simRunning ? 'cbtn running' : 'cbtn';
+  if (simRunning) lastT = null;
+});
+
+El('btn-rst').addEventListener('click', () => {
+  simRunning = false;
+  El('btn-ss').textContent = '▶  START SIMULATION';
+  El('btn-ss').className   = 'cbtn';
+  El('d-sim').className    = 'dot';
+  resetSim();
+});
+
+// ═══════════════════════════════════════════════════════
+//  SIDEBAR RESIZE
+// ═══════════════════════════════════════════════════════
+(function() {
+  const handle  = El('resize-handle');
+  const sidebar = El('sidebar');
+  let resizing  = false, startX = 0, startW = 0;
+
+  handle.addEventListener('mousedown', e => {
+    resizing = true;
+    startX   = e.clientX;
+    startW   = sidebar.offsetWidth;
+    handle.classList.add('dragging');
+    document.body.style.cursor    = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', e => {
+    if (!resizing) return;
+    const delta = startX - e.clientX;          // drag left → wider
+    const newW  = Math.max(180, Math.min(600, startW + delta));
+    sidebar.style.width = newW + 'px';
+    resize();                                   // update Three.js canvas
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!resizing) return;
+    resizing = false;
+    handle.classList.remove('dragging');
+    document.body.style.cursor     = '';
+    document.body.style.userSelect = '';
+  });
+})();
+
+// ═══════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════
+buildInterceptorBody();
+updateStageUI();
+resetSim();
+</script>
+</body>
+</html>
