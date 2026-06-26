@@ -326,15 +326,7 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
 
 <div id="bottom-panel">
   <div class="cpanel">
-    <div class="cpanel-title">Range to target (m)</div>
-    <canvas id="rng-canvas"></canvas>
-  </div>
-  <div class="cpanel">
-    <div class="cpanel-title">Angular miss vs FOV/2 (°)</div>
-    <canvas id="ang-canvas"></canvas>
-  </div>
-  <div class="cpanel">
-    <div class="cpanel-title">Detection rate (det/s rolling)</div>
+    <div class="cpanel-title">Detection over time &nbsp;<span style="color:#00e676">█ detected</span> &nbsp;<span style="color:#444">█ miss</span></div>
     <canvas id="det-canvas"></canvas>
   </div>
 </div>
@@ -987,10 +979,8 @@ function resetSim() {
   El('ov-t').textContent = '0.000';
   El('ov-r').textContent = '---';
   El('ov-c').textContent = '---';
-  lastMissAngle = 0; lastChartPush = 0; rateHistory = [];
-  if (rngChart) { rngChart.data.datasets.forEach(d => d.data = []); rngChart.update('none'); }
-  if (angChart) { angChart.data.datasets.forEach(d => d.data = []); angChart.update('none'); }
-  if (detChart) { detChart.data.datasets.forEach(d => d.data = []); detChart.update('none'); }
+  lastMissAngle = 0; lastChartPush = 0;
+  if (detChart) { detChart.data.datasets[0].data = []; detChart.update('none'); }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1149,7 +1139,7 @@ const BASE_CFG = {
   plugins: { legend: { display: false }, realtimeLine: {} }
 };
 
-let rngChart = null, angChart = null, detChart = null;
+let detChart = null;
 let lastMissAngle = 0;
 
 function initCharts() {
@@ -1157,94 +1147,59 @@ function initCharts() {
   Chart.defaults.borderColor = '#0d1e30';
   Chart.register(realtimeLinePlugin);
 
-  rngChart = new Chart(El('rng-canvas'), {
-    type: 'line',
-    data: { datasets: [
-      { label: 'Range', data: [], borderColor: '#29b6f6', borderWidth: 1.5, pointRadius: 0, tension: 0 },
-      { label: 'Det',   data: [], borderColor: 'transparent', backgroundColor: '#00e676cc',
-        pointRadius: 4, pointStyle: 'circle', showLine: false }
-    ]},
-    options: { ...BASE_CFG, scales: makeScales(0) }
-  });
-
-  angChart = new Chart(El('ang-canvas'), {
-    type: 'line',
-    data: { datasets: [
-      { label: 'Miss°', data: [], borderColor: '#ffd600', borderWidth: 1.5, pointRadius: 0, tension: 0 },
-      { label: 'FOV/2', data: [], borderColor: '#ff4444aa', borderWidth: 1,
-        borderDash: [4, 3], pointRadius: 0, tension: 0 }
-    ]},
-    options: { ...BASE_CFG, scales: makeScales(0) }
-  });
-
   detChart = new Chart(El('det-canvas'), {
     type: 'line',
-    data: { datasets: [
-      { label: 'Det/s', data: [], borderColor: '#00e676', borderWidth: 1.5,
-        backgroundColor: '#00e67633', fill: true, pointRadius: 0, tension: 0.3 },
-      { label: 'Blk/s', data: [], borderColor: '#ff5252', borderWidth: 1,
-        backgroundColor: '#ff525222', fill: true, pointRadius: 0, tension: 0.3 }
-    ]},
-    options: { ...BASE_CFG, scales: makeScales(0) }
+    data: { datasets: [{
+      label: 'Detection',
+      data: [],
+      borderColor: '#00e676',
+      backgroundColor(ctx) {
+        const v = ctx.raw && ctx.raw.y;
+        return v ? '#00e67655' : '#33333322';
+      },
+      borderWidth: 0,
+      pointRadius: 0,
+      stepped: true,
+      fill: true
+    }]},
+    options: {
+      ...BASE_CFG,
+      scales: {
+        ...makeScales(0, 1.1),
+        y: { ...makeScales(0, 1.1).y,
+          ticks: { display: false },
+          grid: { color: '#0d1e30' }
+        }
+      }
+    }
   });
 }
 
-const RATE_WIN = 0.5;
-let rateHistory = [], lastChartPush = 0;
+let lastChartPush = 0;
 
 function updateChartXWindow() {
-  const xMax = Math.max(CHART_WIN, simTime + 1);
+  if (!detChart) return;
+  const xMax = Math.max(CHART_WIN, simTime);
   const xMin = xMax - CHART_WIN;
-  for (const c of [rngChart, angChart, detChart]) {
-    if (!c) continue;
-    c.options.scales.x.min = xMin;
-    c.options.scales.x.max = xMax;
-  }
+  detChart.options.scales.x.min = xMin;
+  detChart.options.scales.x.max = xMax;
 }
 
 function refreshCharts() {
-  // Called every animation frame — redraws to move the real-time marker
-  if (rngChart) rngChart.update('none');
-  if (angChart) angChart.update('none');
   if (detChart) detChart.update('none');
 }
 
 function drawPlots() {
-  if (simTime - lastChartPush < 0.05) return;
+  // Push a point every pulse (driven by pulseClock in simStep, but we sample per-frame here)
+  if (simTime - lastChartPush < 1 / Math.max(1, P('sl-srate')) * 0.99) return;
   lastChartPush = simTime;
 
   updateChartXWindow();
 
-  // Range chart
-  if (rngChart) {
-    rngChart.data.datasets[0].data.push({ x: simTime, y: curRange });
-    if (lastDetectedFlag) rngChart.data.datasets[1].data.push({ x: simTime, y: curRange });
-    for (const ds of rngChart.data.datasets) if (ds.data.length > 3000) ds.data.shift();
-  }
-
-  // Angular miss chart
-  if (angChart) {
-    angChart.data.datasets[0].data.push({ x: simTime, y: lastMissAngle });
-    if (angChart.data.datasets[0].data.length > 3000) angChart.data.datasets[0].data.shift();
-    const fovHalf = P('sl-fov') / 2;
-    angChart.data.datasets[1].data = [
-      { x: angChart.options.scales.x.min, y: fovHalf },
-      { x: angChart.options.scales.x.max, y: fovHalf }
-    ];
-  }
-
-  // Detection rate chart
-  rateHistory.push({ t: simTime, det: lastDetectedFlag ? 1 : 0, blk: lastRodBlockedFlag && !lastDetectedFlag ? 1 : 0 });
-  while (rateHistory.length && rateHistory[0].t < simTime - RATE_WIN) rateHistory.shift();
   if (detChart) {
-    const win = Math.min(RATE_WIN, simTime > 0 ? simTime : RATE_WIN);
-    const detSum = rateHistory.reduce((a, e) => a + e.det, 0);
-    const blkSum = rateHistory.reduce((a, e) => a + e.blk, 0);
-    detChart.data.datasets[0].data.push({ x: simTime, y: detSum / win });
-    detChart.data.datasets[1].data.push({ x: simTime, y: blkSum / win });
-    for (const ds of detChart.data.datasets) if (ds.data.length > 3000) ds.data.shift();
+    detChart.data.datasets[0].data.push({ x: simTime, y: lastDetectedFlag ? 1 : 0 });
+    if (detChart.data.datasets[0].data.length > 10000) detChart.data.datasets[0].data.shift();
   }
-  // Actual chart redraw happens in animate loop via refreshCharts()
 }
 
 // ═══════════════════════════════════════════════════════
