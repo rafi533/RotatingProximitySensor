@@ -123,6 +123,11 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
       <span class="val" id="vl-x">13</span><span class="unit">deg</span>
     </div>
     <div class="row">
+      <span class="lbl">No. of lidars</span>
+      <input type="range" id="sl-nl" min="1" max="8" step="1" value="1">
+      <span class="val" id="vl-nl">1</span><span class="unit"></span>
+    </div>
+    <div class="row">
       <span class="lbl">Sensor FOV (D)<br><span style="font-size:9px;color:#3d6080">(full cone angle)</span></span>
       <input type="range" id="sl-fov" min="0.3" max="30" step="0.1" value="1.8">
       <span class="val" id="vl-fov">1.8</span><span class="unit">deg</span>
@@ -458,64 +463,49 @@ function buildRods() {
 //  SENSOR GROUP
 // ═══════════════════════════════════════════════════════
 // sensorRotGroup rotates around Z at rpm (stage 2)
-// inside: sensorPivotGroup — oriented so its +Z = boresight direction
-//         contains: sensor box, lenses, fov cone
+// Inside: N slotGroups (one per lidar), each pre-rotated by i*2π/N
+// Each slotGroup contains a pivotGroup (position + X tilt) with sensor mesh + FOV cone
 const sensorRotGroup = new THREE.Group();
 interceptorGroup.add(sensorRotGroup);
 
-const sensorPivotGroup = new THREE.Group();
-sensorRotGroup.add(sensorPivotGroup);
-
-let sensorBoxMesh, lens1, lens2, fovConeMesh, fovRimMesh;
-let fovConeColorAttr = null, fovConePosAttr = null;
 const N_FOV_SECTORS = 72;
 let sweptMesh = null;
+const SX = 0.08, SY = 0.04, SZ = 0.12; // sensor box dimensions (visual, ×4 exaggerated)
 
-// Sensor body is modeled as 4cm(X) × 2cm(Y) × 6cm(Z) in local space
-// Local +Z = boresight (direction lenses face)
-// We exaggerate for visibility: ×4 → 8cm × 4cm × 12cm  (visual only)
-const SX = 0.08, SY = 0.04, SZ = 0.12;
+// Arrays — one entry per lidar
+let sensorSlots     = []; // {slotGroup, pivotGroup}
+let sensorData      = []; // {fovConeColorAttr, fovConePosAttr, fovConeMesh, fovRimMesh}
+let allLenses       = []; // all lens1 meshes across all lidars (for pulse animation)
 
-function buildSensorMesh() {
-  if (sensorBoxMesh) sensorPivotGroup.remove(sensorBoxMesh);
-  if (lens1) sensorPivotGroup.remove(lens1);
-  if (lens2) sensorPivotGroup.remove(lens2);
+// Keep a sensorPivotGroup alias pointing to the first sensor so legacy code still works
+let sensorPivotGroup = null;
+let fovConeColorAttr = null, fovConePosAttr = null; // aliases for first sensor (updateFovConeColors uses these)
 
+function buildOneSensorMesh(pivotGroup) {
   const sMat = new THREE.MeshPhongMaterial({ color: 0x203040, shininess: 80 });
-  sensorBoxMesh = new THREE.Mesh(new THREE.BoxGeometry(SX, SY, SZ), sMat);
-  sensorPivotGroup.add(sensorBoxMesh);
-
-  // Two lenses on front face (local +Z face)
-  const lMat1 = new THREE.MeshPhongMaterial({ color: 0xff4444, emissive: 0x660000 }); // laser
-  const lMat2 = new THREE.MeshPhongMaterial({ color: 0x88aaff, emissive: 0x223366 }); // receiver
+  const boxMesh = new THREE.Mesh(new THREE.BoxGeometry(SX, SY, SZ), sMat);
+  pivotGroup.add(boxMesh);
+  const lMat1 = new THREE.MeshPhongMaterial({ color: 0xff4444, emissive: 0x660000 });
+  const lMat2 = new THREE.MeshPhongMaterial({ color: 0x88aaff, emissive: 0x223366 });
   const lR = 0.012;
-  lens1 = new THREE.Mesh(new THREE.CylinderGeometry(lR, lR, 0.008, 12), lMat1);
-  lens1.rotation.x = Math.PI / 2;
-  lens1.position.set(-SX * 0.2, 0, SZ / 2 + 0.004);
-  sensorPivotGroup.add(lens1);
-
-  lens2 = new THREE.Mesh(new THREE.CylinderGeometry(lR, lR, 0.008, 12), lMat2);
-  lens2.rotation.x = Math.PI / 2;
-  lens2.position.set(SX * 0.2, 0, SZ / 2 + 0.004);
-  sensorPivotGroup.add(lens2);
+  const l1 = new THREE.Mesh(new THREE.CylinderGeometry(lR, lR, 0.008, 12), lMat1);
+  l1.rotation.x = Math.PI / 2;
+  l1.position.set(-SX * 0.2, 0, SZ / 2 + 0.004);
+  pivotGroup.add(l1);
+  const l2 = new THREE.Mesh(new THREE.CylinderGeometry(lR, lR, 0.008, 12), lMat2);
+  l2.rotation.x = Math.PI / 2;
+  l2.position.set(SX * 0.2, 0, SZ / 2 + 0.004);
+  pivotGroup.add(l2);
+  return { l1, l2 };
 }
 
-function buildFovCone() {
-  if (fovConeMesh) sensorPivotGroup.remove(fovConeMesh);
-  if (fovRimMesh)  sensorPivotGroup.remove(fovRimMesh);
-  fovConeMesh = null; fovRimMesh = null;
-  fovConeColorAttr = null; fovConePosAttr = null;
-  if (!El('chk-fov').checked) return;
-
+function buildOneFovCone(pivotGroup) {
+  if (!El('chk-fov').checked) return { fovConeMesh: null, fovRimMesh: null, fovConeColorAttr: null, fovConePosAttr: null };
   const D_half = P('sl-fov') / 2 * DEG;
   const L = P('sl-rng');
   const r = Math.tan(D_half) * L;
-
-  // Segmented cone: each sector is one triangle so it can be collapsed for rod holes
-  // Vertex 0 = apex at sensor front face; vertices 1..N+1 = rim
   const pos = [], cols = [], idx = [];
-  pos.push(0, 0, SZ / 2);      // apex (local sensor space)
-  cols.push(0, 0.8, 1);
+  pos.push(0, 0, SZ / 2); cols.push(0, 0.8, 1);
   for (let i = 0; i <= N_FOV_SECTORS; i++) {
     const phi = (i / N_FOV_SECTORS) * Math.PI * 2;
     pos.push(Math.sin(D_half) * Math.cos(phi) * L,
@@ -524,68 +514,83 @@ function buildFovCone() {
     cols.push(0, 0.8, 1);
   }
   for (let i = 0; i < N_FOV_SECTORS; i++) idx.push(0, i + 1, i + 2);
-
   const geo = new THREE.BufferGeometry();
-  const pAttr = new THREE.Float32BufferAttribute(pos, 3);
-  pAttr.setUsage(35048); // DYNAMIC_DRAW
+  const pAttr = new THREE.Float32BufferAttribute(pos, 3); pAttr.setUsage(35048);
+  const cAttr = new THREE.Float32BufferAttribute(cols, 3); cAttr.setUsage(35048);
   geo.setAttribute('position', pAttr);
-  const cAttr = new THREE.Float32BufferAttribute(cols, 3);
-  cAttr.setUsage(35048);
   geo.setAttribute('color', cAttr);
   geo.setIndex(idx);
-  fovConePosAttr  = pAttr;
-  fovConeColorAttr = cAttr;
-
-  fovConeMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-    vertexColors: true, transparent: true, opacity: 0.35,
-    side: THREE.DoubleSide, depthWrite: false
+  const coneMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false
   }));
-  sensorPivotGroup.add(fovConeMesh);
-
-  // Rim ring
+  pivotGroup.add(coneMesh);
   const rimGeo = new THREE.RingGeometry(r * 0.95, r * 1.05, N_FOV_SECTORS);
   rimGeo.rotateX(Math.PI / 2);
-  fovRimMesh = new THREE.Mesh(rimGeo, new THREE.MeshBasicMaterial({
+  const rimMesh = new THREE.Mesh(rimGeo, new THREE.MeshBasicMaterial({
     color: 0x00c8ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide
   }));
-  fovRimMesh.position.z = SZ / 2 + L;
-  sensorPivotGroup.add(fovRimMesh);
+  rimMesh.position.z = SZ / 2 + L;
+  pivotGroup.add(rimMesh);
+  return { fovConeMesh: coneMesh, fovRimMesh: rimMesh, fovConeColorAttr: cAttr, fovConePosAttr: pAttr };
 }
 
-// Called every frame — collapses sectors where rods block the ray
+function buildAllSensors() {
+  // Remove old slot groups
+  for (const s of sensorSlots) sensorRotGroup.remove(s.slotGroup);
+  sensorSlots = []; sensorData = []; allLenses = [];
+
+  const N = Math.round(P('sl-nl')) || 1;
+  for (let i = 0; i < N; i++) {
+    const slotGroup = new THREE.Group();
+    slotGroup.rotation.z = (i / N) * Math.PI * 2; // fixed azimuth offset
+    sensorRotGroup.add(slotGroup);
+
+    const pivotGroup = new THREE.Group();
+    slotGroup.add(pivotGroup);
+
+    const { l1, l2 } = buildOneSensorMesh(pivotGroup);
+    const coneData = buildOneFovCone(pivotGroup);
+    allLenses.push(l1);
+    sensorSlots.push({ slotGroup, pivotGroup });
+    sensorData.push(coneData);
+  }
+  // Legacy aliases → first sensor
+  sensorPivotGroup   = sensorSlots[0]?.pivotGroup ?? null;
+  fovConeColorAttr   = sensorData[0]?.fovConeColorAttr ?? null;
+  fovConePosAttr     = sensorData[0]?.fovConePosAttr   ?? null;
+}
+
+// Called every frame — collapses sectors where rods block the ray (all sensors)
 function updateFovConeColors() {
-  if (!fovConeColorAttr || !fovConePosAttr || !fovConeMesh) return;
   interceptorGroup.updateMatrixWorld(true);
-  const m4 = sensorPivotGroup.matrixWorld;
-  // Sensor origin in world space
-  const orig = new THREE.Vector3(0, 0, SZ / 2).applyMatrix4(m4);
   const D_half = P('sl-fov') / 2 * DEG;
   const L = P('sl-rng');
-  const carr = fovConeColorAttr.array;
-  const parr = fovConePosAttr.array;
+  for (const d of sensorData) {
+    if (!d.fovConeColorAttr || !d.fovConePosAttr || !d.fovConeMesh) continue;
+    const m4   = d.fovConeMesh.parent.matrixWorld; // pivotGroup.matrixWorld
+    const orig = new THREE.Vector3(0, 0, SZ / 2).applyMatrix4(m4);
+    const carr = d.fovConeColorAttr.array;
+    const parr = d.fovConePosAttr.array;
 
-  for (let i = 0; i <= N_FOV_SECTORS; i++) {
-    const phi = (i / N_FOV_SECTORS) * Math.PI * 2;
-    // Rim point in LOCAL sensor space
-    const lx = Math.sin(D_half) * Math.cos(phi) * L;
-    const ly = Math.sin(D_half) * Math.sin(phi) * L;
-    const lz = SZ / 2 + Math.cos(D_half) * L;
-    // Same point in WORLD space (for occlusion check)
-    const wp = new THREE.Vector3(lx, ly, lz).applyMatrix4(m4);
-    const blocked = isOccludedByRod(orig, wp);
-    const vi = (i + 1) * 3; // skip apex at index 0
-
-    if (blocked) {
-      // Collapse rim vertex to apex in local space → triangle has zero area → invisible
-      parr[vi] = 0; parr[vi + 1] = 0; parr[vi + 2] = SZ / 2;
-      carr[vi] = 0.5; carr[vi + 1] = 0; carr[vi + 2] = 0;
-    } else {
-      parr[vi] = lx; parr[vi + 1] = ly; parr[vi + 2] = lz;
-      carr[vi] = 0; carr[vi + 1] = 0.8; carr[vi + 2] = 1;
+    for (let i = 0; i <= N_FOV_SECTORS; i++) {
+      const phi = (i / N_FOV_SECTORS) * Math.PI * 2;
+      const lx = Math.sin(D_half) * Math.cos(phi) * L;
+      const ly = Math.sin(D_half) * Math.sin(phi) * L;
+      const lz = SZ / 2 + Math.cos(D_half) * L;
+      const wp = new THREE.Vector3(lx, ly, lz).applyMatrix4(m4);
+      const blocked = isOccludedByRod(orig, wp);
+      const vi = (i + 1) * 3;
+      if (blocked) {
+        parr[vi] = 0; parr[vi + 1] = 0; parr[vi + 2] = SZ / 2;
+        carr[vi] = 0.5; carr[vi + 1] = 0; carr[vi + 2] = 0;
+      } else {
+        parr[vi] = lx; parr[vi + 1] = ly; parr[vi + 2] = lz;
+        carr[vi] = 0; carr[vi + 1] = 0.8; carr[vi + 2] = 1;
+      }
     }
+    d.fovConeColorAttr.needsUpdate = true;
+    d.fovConePosAttr.needsUpdate = true;
   }
-  fovConeColorAttr.needsUpdate = true;
-  fovConePosAttr.needsUpdate = true;
 }
 
 function buildSweptVolume() {
@@ -687,42 +692,25 @@ function clearSweptOutlines() {
 // ═══════════════════════════════════════════════════════
 //  SENSOR ORIENTATION UPDATE
 // ═══════════════════════════════════════════════════════
-// sensorPivotGroup is placed on the side of the body, boresight at angle X
-function updateSensorPose(rotAngle) {
+// Position all N sensor pivot groups (each slotGroup already has azimuth offset baked in)
+function updateSensorPoses(rotAngle) {
   const X = P('sl-x') * DEG;
-  const R_body = P('sl-ir') / 100;
-  const R_mount = R_body + SX / 2 + 0.005; // body surface + half sensor width
-
-  // sensorRotGroup just rotates around Z (interceptor axis)
+  const R_mount = P('sl-ir') / 100 + SX / 2 + 0.005;
   sensorRotGroup.rotation.z = rotAngle;
-
-  // sensorPivotGroup: translate to side of body, then tilt boresight by X
-  // In sensorRotGroup's local frame, the sensor is at (R_mount, 0, 1.0)
-  // Boresight should point in direction (sin(X), 0, cos(X)) in that frame
-  sensorPivotGroup.position.set(R_mount, 0, 1.0);
-  // The sensor box local +Z = boresight. We need to rotate so local +Z → (sin(X), 0, cos(X))
-  // That's a rotation around local Y by -X (tilting forward)
-  // But we're in sensorRotGroup space where X-axis is radial.
-  // Boresight in sensorRotGroup local: (sin(X), 0, cos(X))
-  // Local sensor +Z needs to map to (sin(X), 0, cos(X))
-  // Rotation: from (0,0,1) to (sin(X), 0, cos(X)) = rotation around Y by X
-  sensorPivotGroup.rotation.set(0, X, 0);
+  for (const { pivotGroup } of sensorSlots) {
+    pivotGroup.position.set(R_mount, 0, 1.0);
+    pivotGroup.rotation.set(0, X, 0);
+  }
 }
 
-// Get world-space sensor origin and boresight direction
-function getSensorWorld(rotAngle) {
-  updateSensorPose(rotAngle);
-  // Force matrix update
+// Return world-space {origin, boresight} for every sensor
+function getSensorWorlds(rotAngle) {
+  updateSensorPoses(rotAngle);
   interceptorGroup.updateMatrixWorld(true);
-
-  // Front face center of sensor in world space
-  const localFront = new THREE.Vector3(0, 0, SZ / 2);
-  const worldFront = localFront.clone().applyMatrix4(sensorPivotGroup.matrixWorld);
-
-  // Boresight = sensorPivotGroup's world +Z direction
-  const worldBore = new THREE.Vector3(0, 0, 1).transformDirection(sensorPivotGroup.matrixWorld).normalize();
-
-  return { origin: worldFront, boresight: worldBore };
+  return sensorSlots.map(({ pivotGroup }) => ({
+    origin:    new THREE.Vector3(0, 0, SZ / 2).applyMatrix4(pivotGroup.matrixWorld),
+    boresight: new THREE.Vector3(0, 0, 1).transformDirection(pivotGroup.matrixWorld).normalize()
+  }));
 }
 
 // ═══════════════════════════════════════════════════════
@@ -973,10 +961,9 @@ function resetSim() {
   updateCoverageBar();
   updateInfoLabels();
   buildTarget();
-  buildSensorMesh();
-  buildFovCone();
+  buildAllSensors();
   buildSweptVolume();
-  updateSensorPose(0);
+  updateSensorPoses(0);
 
   El('m-det').textContent = '0';
   El('m-rate').textContent = '0.0';
@@ -1016,11 +1003,11 @@ function simStep(dt) {
   const phiOffset = simStage === 1 ? P('sl-phi0') * DEG : 0;
   const rotAngle  = simStage === 1 ? phiOffset : sensorRotAngle + phiOffset;
 
-  // Update sensor pose and get world position/direction
-  const { origin, boresight } = getSensorWorld(rotAngle);
+  // Update all sensor poses and get world positions/directions
+  const sensorWorlds = getSensorWorlds(rotAngle);
 
   prevRange = curRange;
-  curRange = targetGroup.position.distanceTo(origin);
+  curRange = targetGroup.position.distanceTo(sensorWorlds[0].origin);
 
   // ── LIDAR PULSES at configured sample rate ───────────────
   pulseClock += dt;
@@ -1030,22 +1017,29 @@ function simStep(dt) {
   while (pulseClock >= pulseInterval) {
     pulseClock -= pulseInterval;
     totalPulses++;
-    const { detected, rodBlocked, closestPt } = checkDetection(origin, boresight);
-    if (detected) {
-      totalDet++;
-      detFrames++;
+    let anyDetected = false, anyRodBlocked = false;
+    for (const { origin, boresight } of sensorWorlds) {
+      const { detected, rodBlocked, closestPt } = checkDetection(origin, boresight);
+      if (detected) {
+        anyDetected = true;
+        if (closestPt) addDetRay(origin, closestPt);
+        updatePulseBeam(origin, boresight, P('sl-rng'));
+      }
+      if (rodBlocked) anyRodBlocked = true;
+    }
+    if (anyDetected) {
+      totalDet++; detFrames++;
       if (firstDetT === null) firstDetT = simTime;
-      if (closestPt) addDetRay(origin, closestPt);
-      updatePulseBeam(origin, boresight, P('sl-rng'));
       lastDetectedFlag = true;
     }
-    if (rodBlocked) lastRodBlockedFlag = true;
+    if (anyRodBlocked) lastRodBlockedFlag = true;
   }
 
-  // Angular miss: angle from boresight to target centre
-  const toTgt = new THREE.Vector3().subVectors(targetGroup.position, origin);
-  if (toTgt.length() > 0.01)
-    lastMissAngle = Math.acos(Math.max(-1, Math.min(1, toTgt.normalize().dot(boresight)))) / DEG;
+  // Angular miss: angle from first sensor boresight to target centre
+  { const { origin: o0, boresight: b0 } = sensorWorlds[0];
+    const toTgt = new THREE.Vector3().subVectors(targetGroup.position, o0);
+    if (toTgt.length() > 0.01)
+      lastMissAngle = Math.acos(Math.max(-1, Math.min(1, toTgt.normalize().dot(b0)))) / DEG; }
 
   // History (legacy ring buffers — kept for potential future use)
   histTimer += dt;
@@ -1272,7 +1266,7 @@ function animate(ts) {
   lastT = ts;
 
   // Gentle lens pulse
-  if (lens1) lens1.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(Date.now() * 0.01);
+  { const ei = 0.5 + 0.5 * Math.sin(Date.now() * 0.01); for (const l of allLenses) l.material.emissiveIntensity = ei; }
 
   // Fade pulse beam over 60 ms wall-clock
   if (pulseBeamLine && pulseBeamLine.visible) {
@@ -1294,12 +1288,13 @@ requestAnimationFrame(animate);
 // ═══════════════════════════════════════════════════════
 //  WIRE UP CONTROLS
 // ═══════════════════════════════════════════════════════
-wireSlider('sl-x',    'vl-x',    0, () => { buildFovCone(); buildSweptVolume(); updateInfoLabels(); if (!simRunning) updateSensorPose(P('sl-phi0')*DEG); });
-wireSlider('sl-fov',  'vl-fov',  0, () => { buildFovCone(); buildSweptVolume(); updateInfoLabels(); });
-wireSlider('sl-rng',  'vl-rng',  0, () => { buildFovCone(); buildSweptVolume(); updateInfoLabels(); });
+wireSlider('sl-x',    'vl-x',    0, () => { buildAllSensors(); buildSweptVolume(); updateInfoLabels(); if (!simRunning) updateSensorPoses(P('sl-phi0')*DEG); });
+wireSlider('sl-fov',  'vl-fov',  1, () => { buildAllSensors(); buildSweptVolume(); updateInfoLabels(); });
+wireSlider('sl-rng',  'vl-rng',  0, () => { buildAllSensors(); buildSweptVolume(); updateInfoLabels(); });
+wireSlider('sl-nl',   'vl-nl',   0, () => { buildAllSensors(); });
 wireSlider('sl-rpm',   'vl-rpm',   0, updateInfoLabels);
 wireSlider('sl-srate', 'vl-srate', 0);
-wireSlider('sl-phi0', 'vl-phi0', 0, () => { if (!simRunning) updateSensorPose(P('sl-phi0')*DEG); });
+wireSlider('sl-phi0', 'vl-phi0', 0, () => { if (!simRunning) updateSensorPoses(P('sl-phi0')*DEG); });
 wireSlider('sl-rodd', 'vl-rodd', 0, () => { buildRods(); updateCoverageBar(); });
 wireSlider('sl-rodr', 'vl-rodr', 0, () => { buildRods(); updateCoverageBar(); });
 wireSlider('sl-iv',    'vl-iv',    0, updateScenarioNote);
