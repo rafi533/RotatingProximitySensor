@@ -62,7 +62,17 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
 .chk-row label { font-size: 15px; color: #7a96b0; cursor: pointer; }
 .chk-row input { accent-color: #29b6f6; cursor: pointer; width: 15px; height: 15px; }
 
-#ov { position: absolute; top: 8px; left: 8px; font-size: 10px; color: #29b6f6; pointer-events: none; line-height: 1.9; background: rgba(5,10,20,.75); padding: 6px 10px; border-radius: 4px; border: 1px solid #1a305033; }
+#ov { position: absolute; top: 8px; right: 8px; font-size: 10px; color: #29b6f6; pointer-events: none; line-height: 1.9; background: rgba(5,10,20,.75); padding: 6px 10px; border-radius: 4px; border: 1px solid #1a305033; }
+
+#det-table { position: absolute; top: 8px; left: 8px; pointer-events: none; background: rgba(5,10,20,.82); border: 1px solid #1a305066; border-radius: 4px; padding: 5px 8px; min-width: 190px; max-height: 320px; overflow: hidden; }
+#det-table .dt-title { font-size: 9px; letter-spacing: 1.5px; color: #3d6080; text-transform: uppercase; margin-bottom: 4px; }
+#det-table table { border-collapse: collapse; width: 100%; }
+#det-table th { font-size: 9px; color: #3d6080; letter-spacing: 1px; padding: 2px 5px; text-align: right; border-bottom: 1px solid #1a3050; }
+#det-table th:first-child { text-align: left; }
+#det-table td { font-size: 10px; font-family: monospace; color: #29b6f6; padding: 1px 5px; text-align: right; }
+#det-table td:first-child { text-align: left; color: #3d6080; }
+#det-table tr.new-det td { color: #00e676; }
+#det-table tr.new-det td:first-child { color: #00e67688; }
 
 .bar-bg { width: 100%; height: 10px; background: #080c12; border: 1px solid #1a3050; border-radius: 5px; overflow: hidden; margin-top: 3px; }
 .bar-fg { height: 100%; background: linear-gradient(90deg,#1565c0,#00e676); border-radius: 5px; transition: width .2s; }
@@ -89,6 +99,13 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
 <div id="main">
 <div id="viewport">
   <canvas id="c3d"></canvas>
+  <div id="det-table">
+    <div class="dt-title">Detections</div>
+    <table>
+      <thead><tr><th>#</th><th>Time (s)</th><th>Dist (m)</th><th>Sensor</th></tr></thead>
+      <tbody id="det-tbody"></tbody>
+    </table>
+  </div>
   <div id="ov">
     <div>t = <span id="ov-t">0.000</span> s</div>
     <div>Range  <span id="ov-r">---</span> m</div>
@@ -364,7 +381,7 @@ renderer.setClearColor(0x05080e, 1);
 renderer.shadowMap.enabled = true;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x05080e, 0.0012); // light haze — ground at 1000 m ≈ 30% visible
+scene.fog = new THREE.FogExp2(0x05080e, 0.006);
 
 const camera = new THREE.PerspectiveCamera(48, 1, 0.01, 4000);
 camera.position.set(-14, 10, -12);
@@ -376,67 +393,56 @@ sunLight.position.set(-10, 20, 5);
 scene.add(sunLight);
 
 // ═══════════════════════════════════════════════════════
-//  GROUND — 1000 m AGL
+//  GROUND — digital grid (1000 m AGL visual)
 // ═══════════════════════════════════════════════════════
-let groundTex = null;
+let groundTex = null, groundMesh = null;
 
 (function buildGround() {
-  // Procedural terrain texture
+  // Digital dot-grid texture — cyan glowing dots on black
+  const SIZE = 512, STEP = 32;
   const gc = document.createElement('canvas');
-  gc.width = gc.height = 512;
+  gc.width = gc.height = SIZE;
   const ctx = gc.getContext('2d');
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, SIZE, SIZE);
 
-  // Base — dark earth
-  ctx.fillStyle = '#16230e';
-  ctx.fillRect(0, 0, 512, 512);
+  for (let gx = 0; gx < SIZE; gx += STEP) {
+    for (let gy = 0; gy < SIZE; gy += STEP) {
+      const major = (gx % (STEP * 4) === 0) && (gy % (STEP * 4) === 0);
+      const r  = major ? 3.5 : 1.8;
+      const glowR = major ? 14 : 8;
+      const col = major ? '#00ffcc' : '#00ccaa';
 
-  // Field patches
-  const patches = [
-    '#1e3010','#243815','#1a2c0c','#2a3e18','#182810',
-    '#2e4420','#1c3212','#283c16','#203414'
-  ];
-  const rng = (n) => Math.floor(Math.random() * n);
-  for (let i = 0; i < 80; i++) {
-    const x = rng(512), y = rng(512), rx = 20+rng(80), ry = 10+rng(50);
-    ctx.fillStyle = patches[rng(patches.length)];
-    ctx.beginPath();
-    ctx.ellipse(x, y, rx, ry, rng(314)/100, 0, Math.PI*2);
-    ctx.fill();
+      // Glow halo
+      const grad = ctx.createRadialGradient(gx, gy, 0, gx, gy, glowR);
+      grad.addColorStop(0, col + '55');
+      grad.addColorStop(1, col + '00');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(gx, gy, glowR, 0, Math.PI * 2); ctx.fill();
+
+      // Bright core
+      ctx.fillStyle = major ? '#aaffee' : '#00ffcc';
+      ctx.beginPath(); ctx.arc(gx, gy, r, 0, Math.PI * 2); ctx.fill();
+    }
   }
 
-  // Agricultural grid lines
-  ctx.strokeStyle = '#0e1e08'; ctx.lineWidth = 1.5;
-  for (let i = 0; i < 512; i += 64) {
-    ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,512); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(512,i); ctx.stroke();
+  // Faint connecting grid lines
+  ctx.strokeStyle = '#00ffcc08'; ctx.lineWidth = 0.5;
+  for (let i = 0; i < SIZE; i += STEP) {
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, SIZE); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(SIZE, i); ctx.stroke();
   }
-
-  // Roads — thin bright lines
-  ctx.strokeStyle = '#4a5030'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(0,170); ctx.lineTo(512,185); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(160,0); ctx.lineTo(175,512); ctx.stroke();
 
   groundTex = new THREE.CanvasTexture(gc);
   groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
-  groundTex.repeat.set(60, 60); // each tile ≈ 100 m, plane = 6000 m
+  groundTex.repeat.set(20, 20); // tile = 20 m on a 400 m plane
 
-  const geo = new THREE.PlaneGeometry(6000, 6000);
-  const mat = new THREE.MeshLambertMaterial({ map: groundTex });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.y = -1000;  // 1000 m AGL
-  scene.add(mesh);
-
-  // Horizon haze band
-  const hazeGeo = new THREE.PlaneGeometry(6000, 300);
-  const hazeMat = new THREE.MeshBasicMaterial({
-    color: 0x0a1828, transparent: true, opacity: 0.55, depthWrite: false
-  });
-  const haze = new THREE.Mesh(hazeGeo, hazeMat);
-  haze.position.y = -1000;
-  haze.rotation.x = -Math.PI / 2;
-  haze.position.z = -2000;
-  scene.add(haze);
+  const geo = new THREE.PlaneGeometry(400, 400);
+  const mat = new THREE.MeshBasicMaterial({ map: groundTex, transparent: true, opacity: 0.85 });
+  groundMesh = new THREE.Mesh(geo, mat);
+  groundMesh.rotation.x = -Math.PI / 2;
+  groundMesh.position.y = -14;  // visible below engagement, represents 1000 m AGL
+  scene.add(groundMesh);
 })();
 
 // ═══════════════════════════════════════════════════════
@@ -964,6 +970,8 @@ const H_DT = H_SECS / H;
 
 let totalDet = 0, detFrames = 0, totalFrames = 0;
 let firstDetT = null;
+let detEvents = [];       // {t, dist, sensor} — detection rising-edge log
+let prevAnyDetected = false; // for rising-edge detection
 let prevRange = null, curRange = null;
 
 function resetSim() {
@@ -973,6 +981,7 @@ function resetSim() {
   pulseClock = 0; totalPulses = 0;
   totalDet = 0; detFrames = 0; totalFrames = 0;
   firstDetT = null; prevRange = null; curRange = null;
+  detEvents = []; prevAnyDetected = false; updateDetTable();
   detHist.fill(0); rngHist.fill(0);
   histIdx = 0; histTimer = 0;
 
@@ -1079,9 +1088,12 @@ function simStep(dt) {
     pulseClock -= pulseInterval;
     totalPulses++;
     let anyDetected = false, anyRodBlocked = false;
-    for (const { origin, boresight } of sensorWorlds) {
-      const { detected, rodBlocked, closestPt } = checkDetection(origin, boresight);
+    let firstDetSensor = -1, firstDetDist = 0;
+    for (let si = 0; si < sensorWorlds.length; si++) {
+      const { origin, boresight } = sensorWorlds[si];
+      const { detected, rodBlocked, closestPt, closestDist } = checkDetection(origin, boresight);
       if (detected) {
+        if (!anyDetected) { firstDetSensor = si + 1; firstDetDist = closestDist ?? curRange; }
         anyDetected = true;
         if (closestPt) addDetRay(origin, closestPt);
         updatePulseBeam(origin, boresight, P('sl-rng'));
@@ -1092,7 +1104,14 @@ function simStep(dt) {
       totalDet++; detFrames++;
       if (firstDetT === null) firstDetT = simTime;
       lastDetectedFlag = true;
+      // Record rising-edge detection event
+      if (!prevAnyDetected) {
+        detEvents.push({ t: simTime, dist: firstDetDist, sensor: firstDetSensor });
+        if (detEvents.length > 40) detEvents.shift();
+        updateDetTable();
+      }
     }
+    prevAnyDetected = anyDetected;
     if (anyRodBlocked) lastRodBlockedFlag = true;
   }
 
@@ -1197,6 +1216,20 @@ function initCharts() {
              grid: { color: '#0d1e30' } }
       }
     }
+  });
+}
+
+function updateDetTable() {
+  const tbody = El('det-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  // Show newest at top — slice last 15
+  const show = detEvents.slice(-15).reverse();
+  show.forEach((ev, i) => {
+    const tr = document.createElement('tr');
+    if (i === 0) tr.className = 'new-det';
+    tr.innerHTML = `<td>${detEvents.length - i}</td><td>${ev.t.toFixed(3)}</td><td>${ev.dist.toFixed(1)}</td><td>${ev.sensor}</td>`;
+    tbody.appendChild(tr);
   });
 }
 
@@ -1340,8 +1373,11 @@ function animate(ts) {
     }
   }
 
-  // Scroll ground texture forward at interceptor speed (1 tile = 100 m)
-  if (groundTex) groundTex.offset.y = simTime * P('sl-iv') / 100;
+  // Move ground mesh — wrap every 20 m (one tile) so it looks infinite
+  if (groundMesh) {
+    const TILE = 20;
+    groundMesh.position.z = ((simTime * P('sl-iv')) % TILE) - TILE / 2;
+  }
 
   updateFovConeColors();
   updateCamera();
@@ -1354,7 +1390,7 @@ function animate(ts) {
 wireSlider('sl-x',    'vl-x',    0, () => { buildAllSensors(); buildSweptVolume(); updateInfoLabels(); if (!simRunning) updateSensorPoses(P('sl-phi0')*DEG); });
 wireSlider('sl-fov',  'vl-fov',  1, () => { buildAllSensors(); buildSweptVolume(); updateInfoLabels(); });
 wireSlider('sl-rng',  'vl-rng',  0, () => { buildAllSensors(); buildSweptVolume(); updateInfoLabels(); });
-wireSlider('sl-nl',   'vl-nl',   0, () => { buildAllSensors(); });
+wireSlider('sl-nl',   'vl-nl',   0, () => { buildAllSensors(); updateSensorPoses(simRunning ? sensorRotAngle : P('sl-phi0') * DEG); });
 wireSlider('sl-rpm',   'vl-rpm',   0, updateInfoLabels);
 wireSlider('sl-srate', 'vl-srate', 0);
 wireSlider('sl-phi0', 'vl-phi0', 0, () => { if (!simRunning) updateSensorPoses(P('sl-phi0')*DEG); });
