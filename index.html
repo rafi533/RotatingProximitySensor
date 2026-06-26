@@ -1246,8 +1246,8 @@ function updateStageUI() {
 //  ORBIT CAMERA
 // ═══════════════════════════════════════════════════════
 let drag = false, prevMx = 0, prevMy = 0;
-let sph = { th: -0.6, ph: 0.85, r: 30 };
-const camTarget = new THREE.Vector3(4, 0, 8);
+let sph = { th: -0.6, ph: 0.85, r: 12 };
+const camTarget = new THREE.Vector3(0, 0, 2);
 
 canvas3d.addEventListener('mousedown', e => { drag = true; prevMx = e.clientX; prevMy = e.clientY; });
 canvas3d.addEventListener('mouseup',   () => drag = false);
