@@ -94,6 +94,7 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
     <div>Beam θ  <span id="ov-a">0.0</span>°</div>
     <div>Closing <span id="ov-c">---</span> m/s</div>
     <div>Stage   <span id="ov-s">1 — Fixed</span></div>
+    <div>Pulses  <span id="ov-p">300</span> Hz</div>
     <div>Pitch <span id="ov-pitch">0.0</span>°  Yaw <span id="ov-yaw">0.0</span>°</div>
     <div>Roll  <span id="ov-roll">0.0</span>°</div>
   </div>
@@ -142,6 +143,11 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
       <span class="lbl">Spin rate</span>
       <input type="range" id="sl-rpm" min="100" max="6000" step="50" value="1500">
       <span class="val" id="vl-rpm">1500</span><span class="unit">RPM</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Sample rate</span>
+      <input type="range" id="sl-srate" min="10" max="10000" step="10" value="300">
+      <span class="val" id="vl-srate">300</span><span class="unit">Hz</span>
     </div>
     <div class="row">
       <span class="lbl">Mount offset φ<br><span style="font-size:9px;color:#3d6080">(azimuth at t=0)</span></span>
@@ -833,6 +839,7 @@ function checkDetection(sensorOrigin, boresight) {
 // ═══════════════════════════════════════════════════════
 let simRunning = false;
 let bodyPitch = 0, bodyYaw = 0, bodyRoll = 0;
+let pulseClock = 0, totalPulses = 0;
 
 // Pulse beam flash — red line shown briefly after each detection
 let pulseBeamLine = null;
@@ -880,6 +887,7 @@ function resetSim() {
   simTime = 0; sensorRotAngle = 0;
   bodyPitch = 0; bodyYaw = 0; bodyRoll = 0;
   interceptorGroup.rotation.set(0, 0, 0);
+  pulseClock = 0; totalPulses = 0;
   totalDet = 0; detFrames = 0; totalFrames = 0;
   firstDetT = null; prevRange = null; curRange = null;
   detHist.fill(0); rngHist.fill(0);
@@ -975,25 +983,34 @@ function simStep(dt) {
   // Update sensor pose and get world position/direction
   const { origin, boresight } = getSensorWorld(rotAngle);
 
-  // Detection test
-  const { detected, rodBlocked, closestPt } = checkDetection(origin, boresight);
-
-  if (detected) {
-    totalDet++;
-    detFrames++;
-    if (firstDetT === null) firstDetT = simTime;
-    if (closestPt) addDetRay(origin, closestPt);
-    updatePulseBeam(origin, boresight, P('sl-rng'));
-  }
-
   prevRange = curRange;
   curRange = targetGroup.position.distanceTo(origin);
+
+  // ── LIDAR PULSES at configured sample rate ───────────────
+  pulseClock += dt;
+  const pulseInterval = 1.0 / P('sl-srate');
+  let lastDetected = false, lastRodBlocked = false;
+
+  while (pulseClock >= pulseInterval) {
+    pulseClock -= pulseInterval;
+    totalPulses++;
+    const { detected, rodBlocked, closestPt } = checkDetection(origin, boresight);
+    if (detected) {
+      totalDet++;
+      detFrames++;
+      if (firstDetT === null) firstDetT = simTime;
+      if (closestPt) addDetRay(origin, closestPt);
+      updatePulseBeam(origin, boresight, P('sl-rng'));
+      lastDetected = true;
+    }
+    if (rodBlocked) lastRodBlocked = true;
+  }
 
   // History
   histTimer += dt;
   while (histTimer >= H_DT) {
     histTimer -= H_DT;
-    detHist[histIdx % H] = detected ? 1 : (rodBlocked ? 0.5 : 0);
+    detHist[histIdx % H] = lastDetected ? 1 : (lastRodBlocked ? 0.5 : 0);
     rngHist[histIdx % H] = curRange;
     histIdx++;
   }
@@ -1006,22 +1023,24 @@ function simStep(dt) {
   El('ov-r').textContent = curRange.toFixed(2);
   El('ov-a').textContent = ((rotAngle * 180 / Math.PI) % 360).toFixed(1);
   El('ov-c').textContent = closingSpd.toFixed(1);
+  El('ov-p').textContent = P('sl-srate').toFixed(0);
 
-  El('m-det').textContent = totalDet;
+  El('m-det').textContent  = totalDet;
   El('m-rate').textContent = (totalDet / Math.max(simTime, 0.001)).toFixed(1);
-  El('m-duty').textContent = ((detFrames / totalFrames) * 100).toFixed(1) + '%';
-  El('m-cl').textContent = closingSpd.toFixed(0);
+  El('m-duty').textContent = (totalPulses > 0 ? (totalDet / totalPulses * 100).toFixed(1) : '0') + '%';
+  El('m-cl').textContent   = closingSpd.toFixed(0);
   if (firstDetT !== null) El('m-1st').textContent = firstDetT.toFixed(3);
-  if (closingSpd > 0.5) El('m-tti').textContent = (curRange / closingSpd).toFixed(2);
+  if (closingSpd > 0.5)   El('m-tti').textContent = (curRange / closingSpd).toFixed(2);
 
   El('ov-pitch').textContent = (bodyPitch / DEG).toFixed(1);
   El('ov-yaw').textContent   = (bodyYaw   / DEG).toFixed(1);
   El('ov-roll').textContent  = (bodyRoll  / DEG).toFixed(1);
 
-  El('d-hit').className = 'dot' + (detected ? ' hit' : '');
-  El('d-rod').className = 'dot' + (rodBlocked && !detected ? ' warn' : '');
+  El('d-hit').className = 'dot' + (lastDetected ? ' hit' : '');
+  El('d-rod').className = 'dot' + (lastRodBlocked && !lastDetected ? ' warn' : '');
   El('d-sim').className = 'dot on';
 
+  totalFrames++;
   drawPlots();
 
   // Stop at very close range
@@ -1211,7 +1230,8 @@ requestAnimationFrame(animate);
 wireSlider('sl-x',    'vl-x',    0, () => { buildFovCone(); buildSweptVolume(); updateInfoLabels(); if (!simRunning) updateSensorPose(P('sl-phi0')*DEG); });
 wireSlider('sl-fov',  'vl-fov',  0, () => { buildFovCone(); buildSweptVolume(); updateInfoLabels(); });
 wireSlider('sl-rng',  'vl-rng',  0, () => { buildFovCone(); buildSweptVolume(); updateInfoLabels(); });
-wireSlider('sl-rpm',  'vl-rpm',  0, updateInfoLabels);
+wireSlider('sl-rpm',   'vl-rpm',   0, updateInfoLabels);
+wireSlider('sl-srate', 'vl-srate', 0);
 wireSlider('sl-phi0', 'vl-phi0', 0, () => { if (!simRunning) updateSensorPose(P('sl-phi0')*DEG); });
 wireSlider('sl-rodd', 'vl-rodd', 0, () => { buildRods(); updateCoverageBar(); });
 wireSlider('sl-rodr', 'vl-rodr', 0, () => { buildRods(); updateCoverageBar(); });
