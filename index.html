@@ -1104,12 +1104,9 @@ function simStep(dt) {
       totalDet++; detFrames++;
       if (firstDetT === null) firstDetT = simTime;
       lastDetectedFlag = true;
-      // Record rising-edge detection event
-      if (!prevAnyDetected) {
-        detEvents.push({ t: simTime, dist: firstDetDist, sensor: firstDetSensor });
-        if (detEvents.length > 40) detEvents.shift();
-        updateDetTable();
-      }
+      // Record every detection pulse
+      detEvents.push({ t: simTime, dist: firstDetDist, sensor: firstDetSensor });
+      if (detEvents.length > 200) detEvents.shift();
     }
     prevAnyDetected = anyDetected;
     if (anyRodBlocked) lastRodBlockedFlag = true;
@@ -1157,6 +1154,7 @@ function simStep(dt) {
 
   totalFrames++;
   drawPlots();
+  updateDetTable();
 
   // End of run: close range OR repeat interval elapsed
   const repeatOn  = El('chk-repeat').checked;
