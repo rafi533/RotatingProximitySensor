@@ -17,7 +17,7 @@ body { background: #08080d; color: #c0d0e0; font-family: 'Courier New', monospac
 .dot.hit { background: #ff5252; box-shadow: 0 0 5px #ff5252; animation: blink .2s ease-in-out infinite alternate; }
 @keyframes blink { from{opacity:1}to{opacity:.35} }
 
-#main { display: flex; flex: 1; overflow: hidden; }
+#main { display: flex; flex: 1; overflow: hidden; min-height: 0; }
 #viewport { flex: 1; position: relative; min-width: 0; }
 canvas#c3d { width: 100%; height: 100%; display: block; }
 
@@ -45,11 +45,9 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
 .mval.y { color: #ffd600; }
 .mlbl { font-size: 8px; color: #3d6080; text-transform: uppercase; letter-spacing: .8px; margin-top: 2px; }
 
-.chart-wrap { position: relative; background: #050810; border: 1px solid #1a3050; border-radius: 2px; margin-top: 5px; }
-.chart-cv { display: block; width: 100% !important; }
-#det-canvas { height: 52px; }
-#rng-canvas { height: 80px; }
-#ang-canvas { height: 80px; }
+#bottom-panel { height: 160px; flex-shrink: 0; display: flex; padding: 6px 8px; gap: 8px; background: #0b0f18; border-top: 1px solid #1a3050; }
+.cpanel { flex: 1; display: flex; flex-direction: column; background: #050810; border: 1px solid #1a3050; border-radius: 3px; padding: 4px 6px; min-width: 0; }
+.cpanel-title { font-size: 9px; color: #3d6080; letter-spacing: 1px; text-transform: uppercase; flex-shrink: 0; margin-bottom: 3px; }
 
 .toggle-row { display: flex; gap: 6px; margin-bottom: 6px; }
 .tbtn { flex: 1; padding: 5px 2px; background: #080c12; border: 1px solid #1a3050; color: #5a7a9a; font-size: 10px; cursor: pointer; border-radius: 3px; text-align: center; transition: all .15s; font-family: inherit; }
@@ -290,12 +288,6 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
       <div class="mbox"><div class="mval" id="m-1st">---</div><div class="mlbl">1st Det (s)</div></div>
       <div class="mbox"><div class="mval" id="m-cl">---</div><div class="mlbl">Close m/s</div></div>
     </div>
-    <div style="font-size:9px;color:#3d6080;margin-top:6px;">Range to target (m)</div>
-    <div class="chart-wrap"><canvas id="rng-canvas" class="chart-cv" height="80"></canvas></div>
-    <div style="font-size:9px;color:#3d6080;margin-top:6px;">Angular miss vs FOV/2 (°)</div>
-    <div class="chart-wrap"><canvas id="ang-canvas" class="chart-cv" height="80"></canvas></div>
-    <div style="font-size:9px;color:#3d6080;margin-top:6px;">Detection timeline (last 2 s)</div>
-    <div class="chart-wrap"><canvas id="det-canvas" class="chart-cv" height="52"></canvas></div>
   </div>
 
   <!-- CONTROL -->
@@ -304,6 +296,11 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
     <button class="cbtn" id="btn-ss">▶  START SIMULATION</button>
     <button class="cbtn reset" id="btn-rst">↺  RESET</button>
     <div class="row" style="margin-top:6px;">
+      <span class="lbl">Chart window</span>
+      <input type="range" id="sl-cwin" min="0.1" max="10" step="0.1" value="0.4">
+      <span class="val" id="vl-cwin">0.4</span><span class="unit">s</span>
+    </div>
+    <div class="row">
       <span class="lbl">Time scale</span>
       <input type="range" id="sl-ts" min="0.05" max="5" step="0.05" value="0.1">
       <span class="val" id="vl-ts">0.1</span><span class="unit">×</span>
@@ -325,6 +322,13 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
 
 </div><!-- sidebar -->
 </div><!-- main -->
+
+<div id="bottom-panel">
+  <div class="cpanel">
+    <div class="cpanel-title">Detection over time &nbsp;<span style="color:#00e676">█ detected</span> &nbsp;<span style="color:#333">█ miss</span></div>
+    <canvas id="det-canvas" height="120"></canvas>
+  </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -974,10 +978,8 @@ function resetSim() {
   El('ov-t').textContent = '0.000';
   El('ov-r').textContent = '---';
   El('ov-c').textContent = '---';
-  lastMissAngle = 0; lastChartPush = 0; rateHistory = [];
-  if (rngChart) { rngChart.data.datasets.forEach(d => d.data = []); rngChart.update('none'); }
-  if (angChart) { angChart.data.datasets.forEach(d => d.data = []); angChart.update('none'); }
-  if (detChart) { detChart.data.datasets.forEach(d => d.data = []); detChart.update('none'); }
+  lastMissAngle = 0; lastChartPush = 0;
+  if (detChart) { detChart.data.datasets[0].data = []; detChart.update('none'); }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1094,105 +1096,62 @@ function simStep(dt) {
 }
 
 // ═══════════════════════════════════════════════════════
-//  CHART.JS CHARTS
+//  DETECTION CHART
 // ═══════════════════════════════════════════════════════
-const CHART_CFG = {
-  animation: false,
-  responsive: false,
-  plugins: { legend: { display: false } },
-  scales: {
-    x: { type: 'linear', ticks: { color: '#3d6080', font: { size: 8 } }, grid: { color: '#0d1e30' } },
-    y: { ticks: { color: '#3d6080', font: { size: 8 } }, grid: { color: '#0d1e30' } }
-  }
-};
 
-let rngChart = null, angChart = null, detChart = null;
+let detChart = null;
 let lastMissAngle = 0;
+let chartWin = 0.4; // seconds shown on X axis
+let lastChartPush = 0;
 
 function initCharts() {
-  Chart.defaults.color = '#3d6080';
-  Chart.defaults.borderColor = '#0d1e30';
+  const cv = El('det-canvas');
+  cv.width  = cv.parentElement.clientWidth  || 800;
+  cv.height = 120;
 
-  rngChart = new Chart(El('rng-canvas'), {
+  detChart = new Chart(cv, {
     type: 'line',
-    data: {
-      datasets: [
-        { label: 'Range', data: [], borderColor: '#29b6f6', borderWidth: 1.5, pointRadius: 0, tension: 0 },
-        { label: 'Det',   data: [], borderColor: 'transparent', backgroundColor: '#00e67688',
-          pointRadius: 3, pointStyle: 'circle', showLine: false }
-      ]
-    },
-    options: { ...CHART_CFG, scales: { ...CHART_CFG.scales,
-      x: { ...CHART_CFG.scales.x, title: { display: false } },
-      y: { ...CHART_CFG.scales.y, min: 0 }
-    }}
-  });
-
-  angChart = new Chart(El('ang-canvas'), {
-    type: 'line',
-    data: {
-      datasets: [
-        { label: 'Miss°', data: [], borderColor: '#ffd600', borderWidth: 1.5, pointRadius: 0, tension: 0 },
-        { label: 'FOV/2', data: [], borderColor: '#ff444488', borderWidth: 1,
-          borderDash: [4, 3], pointRadius: 0, tension: 0 }
-      ]
-    },
-    options: { ...CHART_CFG, scales: { ...CHART_CFG.scales,
-      y: { ...CHART_CFG.scales.y, min: 0 }
-    }}
-  });
-
-  detChart = new Chart(El('det-canvas'), {
-    type: 'bar',
-    data: {
-      datasets: [
-        { label: 'Det rate', data: [], backgroundColor: '#00e67688', barPercentage: 1, categoryPercentage: 1 },
-        { label: 'Blocked',  data: [], backgroundColor: '#ff525244', barPercentage: 1, categoryPercentage: 1 }
-      ]
-    },
-    options: { ...CHART_CFG,
-      scales: { ...CHART_CFG.scales, x: { ...CHART_CFG.scales.x, type: 'linear', offset: false }, y: { ...CHART_CFG.scales.y, min: 0 } }
+    data: { datasets: [{
+      data: [],
+      borderColor: '#00e676',
+      backgroundColor: '#00e67640',
+      borderWidth: 0,
+      pointRadius: 0,
+      stepped: true,
+      fill: true
+    }]},
+    options: {
+      animation: false,
+      responsive: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { type: 'linear', min: 0, max: chartWin,
+             ticks: { color: '#3d6080', font: { size: 8 }, maxTicksLimit: 8 },
+             grid: { color: '#0d1e30' } },
+        y: { min: -0.05, max: 1.1,
+             ticks: { display: false },
+             grid: { color: '#0d1e30' } }
+      }
     }
   });
 }
 
-const RATE_WIN = 0.5; // rolling window in seconds
-let rateHistory = [], lastChartPush = 0;
-
 function drawPlots() {
-  // Push new data point every ~50ms sim-time
-  if (simTime - lastChartPush < 0.05) return;
+  if (!detChart) return;
+  // one point per pulse interval
+  const pulseInterval = 1.0 / Math.max(1, P('sl-srate'));
+  if (simTime - lastChartPush < pulseInterval * 0.9) return;
   lastChartPush = simTime;
 
-  // Chart 1: range + detection scatter
-  if (rngChart) {
-    rngChart.data.datasets[0].data.push({ x: simTime, y: curRange });
-    if (lastDetectedFlag) rngChart.data.datasets[1].data.push({ x: simTime, y: curRange });
-    for (const ds of rngChart.data.datasets) if (ds.data.length > 2000) ds.data.shift();
-    rngChart.update('none');
-  }
+  detChart.data.datasets[0].data.push({ x: simTime, y: lastDetectedFlag ? 1 : 0 });
+  if (detChart.data.datasets[0].data.length > 5000) detChart.data.datasets[0].data.shift();
 
-  // Chart 2: angular miss vs FOV/2
-  if (angChart) {
-    angChart.data.datasets[0].data.push({ x: simTime, y: lastMissAngle });
-    if (angChart.data.datasets[0].data.length > 2000) angChart.data.datasets[0].data.shift();
-    const fovHalf = P('sl-fov') / 2;
-    angChart.data.datasets[1].data = [{ x: 0, y: fovHalf }, { x: simTime + 10, y: fovHalf }];
-    angChart.update('none');
-  }
+  // rolling X window
+  const xMax = Math.max(chartWin, simTime);
+  detChart.options.scales.x.min = xMax - chartWin;
+  detChart.options.scales.x.max = xMax;
 
-  // Chart 3: rolling detection rate
-  rateHistory.push({ t: simTime, det: lastDetectedFlag ? 1 : 0, blk: lastRodBlockedFlag && !lastDetectedFlag ? 1 : 0 });
-  while (rateHistory.length && rateHistory[0].t < simTime - RATE_WIN) rateHistory.shift();
-  if (detChart) {
-    const win = Math.max(RATE_WIN, simTime < RATE_WIN ? simTime : RATE_WIN);
-    const detSum = rateHistory.reduce((a, e) => a + e.det, 0);
-    const blkSum = rateHistory.reduce((a, e) => a + e.blk, 0);
-    detChart.data.datasets[0].data.push({ x: simTime, y: detSum / win });
-    detChart.data.datasets[1].data.push({ x: simTime, y: blkSum / win });
-    for (const ds of detChart.data.datasets) if (ds.data.length > 2000) ds.data.shift();
-    detChart.update('none');
-  }
+  detChart.update('none');
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1281,10 +1240,11 @@ function resize() {
   camera.aspect = vp.clientWidth / vp.clientHeight;
   camera.updateProjectionMatrix();
 
-  for (const id of ['det-canvas', 'rng-canvas']) {
-    const cv = El(id);
-    cv.width  = cv.clientWidth  || 260;
-    cv.height = cv.clientHeight || (id === 'det-canvas' ? 52 : 70);
+  // resize chart canvas to match its container width (height is fixed)
+  if (detChart) {
+    const cv = El('det-canvas');
+    const w = cv.parentElement.clientWidth || 800;
+    if (cv.width !== w) { cv.width = w; detChart.resize(); }
   }
 }
 window.addEventListener('resize', resize);
@@ -1346,6 +1306,7 @@ wireSlider('sl-tr0',  'vl-tr0',  0);
 wireSlider('sl-oy',   'vl-oy',   1);
 wireSlider('sl-oz',   'vl-oz',   1);
 wireSlider('sl-ts',   'vl-ts',   1);
+wireSlider('sl-cwin', 'vl-cwin', 1, () => { chartWin = P('sl-cwin'); });
 
 El('sel-sc').addEventListener('change', () => { updateScenarioNote(); if (!simRunning) resetSim(); });
 
