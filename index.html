@@ -833,28 +833,37 @@ function getTargetSamplePoints() {
 }
 
 function checkDetection(sensorOrigin, boresight) {
-  const D_half = (P('sl-fov') / 2) * DEG;
   const maxR = P('sl-rng');
-  const pts = getTargetSamplePoints();
-  let detected = false, rodBlocked = false;
-  let closestPt = null, closestDist = Infinity;
+  const tw = P('sl-tw'), th = P('sl-th'), td = P('sl-td');
+  const c = targetGroup.position;
 
-  for (const pt of pts) {
-    const v = new THREE.Vector3().subVectors(pt, sensorOrigin);
-    const dist = v.length();
-    if (dist > maxR) continue;
-
-    const angle = Math.acos(Math.max(-1, Math.min(1, v.dot(boresight) / dist)));
-    if (angle > D_half) continue;
-
-    // Within FOV cone — check rod occlusion
-    if (isOccludedByRod(sensorOrigin, pt)) { rodBlocked = true; continue; }
-
-    detected = true;
-    if (dist < closestDist) { closestDist = dist; closestPt = pt.clone(); }
+  // Slab method: ray vs axis-aligned box
+  let tMin = -Infinity, tMax = Infinity;
+  const axes = [
+    { o: sensorOrigin.x, d: boresight.x, lo: c.x - td / 2, hi: c.x + td / 2 },
+    { o: sensorOrigin.y, d: boresight.y, lo: c.y - th / 2, hi: c.y + th / 2 },
+    { o: sensorOrigin.z, d: boresight.z, lo: c.z - tw / 2, hi: c.z + tw / 2 },
+  ];
+  for (const { o, d, lo, hi } of axes) {
+    if (Math.abs(d) < 1e-10) {
+      if (o < lo || o > hi) return { detected: false, rodBlocked: false };
+      continue;
+    }
+    const t1 = (lo - o) / d, t2 = (hi - o) / d;
+    tMin = Math.max(tMin, Math.min(t1, t2));
+    tMax = Math.min(tMax, Math.max(t1, t2));
   }
 
-  return { detected, rodBlocked, closestPt, closestDist };
+  if (tMin > tMax) return { detected: false, rodBlocked: false }; // ray misses box
+
+  const t = tMin > 0 ? tMin : tMax; // use front face; fall back to back face if origin inside
+  if (t < 0 || t > maxR) return { detected: false, rodBlocked: false };
+
+  const hitPt = sensorOrigin.clone().addScaledVector(boresight, t);
+
+  if (isOccludedByRod(sensorOrigin, hitPt)) return { detected: false, rodBlocked: true };
+
+  return { detected: true, rodBlocked: false, closestPt: hitPt, closestDist: t };
 }
 
 // ═══════════════════════════════════════════════════════
