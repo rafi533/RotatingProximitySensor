@@ -971,12 +971,15 @@ function simStep(dt) {
   bodyYaw   += P('sl-yaw')   * DEG * dt;
   bodyRoll  += P('sl-roll')  * DEG * dt;
 
-  // Advance sensor rotation (stage 2)
-  if (simStage===2) sensorRotAngle += (P('sl-rpm')/60)*2*Math.PI*dt;
-
   const phiOff = simStage===1 ? P('sl-phi0')*DEG : 0;
-  const rotAng  = simStage===1 ? phiOff : sensorRotAngle + phiOff;
-  const { origin, boresight } = getSensorWorld(rotAng);
+  const rpmRate = (P('sl-rpm')/60)*2*Math.PI; // rad/s
+
+  // Advance sensor rotation by full dt (used for display / pose at end of frame)
+  if (simStage===2) sensorRotAngle += rpmRate * dt;
+
+  // For the per-frame range reading use end-of-frame pose
+  const rotAngDisplay = simStage===1 ? phiOff : sensorRotAngle + phiOff;
+  const { origin, boresight } = getSensorWorld(rotAngDisplay);
 
   // Range update every frame (continuous)
   prevRange = curRange;
@@ -984,34 +987,52 @@ function simStep(dt) {
   const closing = prevRange!==null && dt>0 ? (prevRange-curRange)/dt : 0;
 
   // ── LIDAR PULSES at sample rate ──────────────────────────────
+  // Each pulse fires at its own sub-frame rotation angle so fast rotation is accurate.
   pulseClock += dt;
   const pulseInterval = 1.0 / P('sl-srate');
   let lastDetected=false, lastRodBlocked=false;
+  // Track how much rotation we've already consumed within this frame
+  let rotConsumed = 0;
 
   while (pulseClock >= pulseInterval) {
     pulseClock -= pulseInterval;
     totalPulses++;
 
-    const pertBore = getPerturbedBoresight(boresight, simTime);
-    const { detected, rodBlocked, closestPt } = checkDetection(origin, pertBore);
+    // Rotation angle at this specific pulse (stage 2: advance sub-frame; stage 1: fixed)
+    let pulseRotAng;
+    if (simStage===2) {
+      rotConsumed += rpmRate * pulseInterval;
+      pulseRotAng = (sensorRotAngle - rpmRate*dt) + rotConsumed + phiOff;
+    } else {
+      pulseRotAng = phiOff;
+    }
+    const { origin: pOrg, boresight: pBore } = getSensorWorld(pulseRotAng);
+
+    const pertBore = getPerturbedBoresight(pBore, simTime);
+    const { detected, rodBlocked, closestPt } = checkDetection(pOrg, pertBore);
 
     // Flash the beam red on every pulse (wall-clock timer so it's visible at any time scale)
-    updatePulseBeam(origin, pertBore, P('sl-rng'));
+    updatePulseBeam(pOrg, pertBore, P('sl-rng'));
 
     if (detected) {
       totalDet++;
       if (firstDetT===null) firstDetT=simTime;
-      if (closestPt) addDetRay(origin, closestPt);
+      if (closestPt) addDetRay(pOrg, closestPt);
       lastDetected=true; intervalDet=true;
     }
     if (rodBlocked) { rodBlockedPulses++; lastRodBlocked=true; intervalBlocked=true; }
   }
 
-  // Compute angular miss every step (angle from boresight to target centre)
-  const toTgt = new THREE.Vector3().subVectors(targetGroup.position, origin);
-  if (toTgt.length() > 0.01) {
-    lastMissAngle = Math.acos(Math.max(-1, Math.min(1, toTgt.normalize().dot(boresight)))) / DEG;
+  // Compute angular miss: minimum angle across all target sample points (not just centre)
+  let minMiss = Infinity;
+  for (const pt of getTargetSamplePoints()) {
+    const v = new THREE.Vector3().subVectors(pt, origin);
+    const d = v.length();
+    if (d < 0.01) continue;
+    const a = Math.acos(Math.max(-1, Math.min(1, v.dot(boresight)/d))) / DEG;
+    if (a < minMiss) minMiss = a;
   }
+  if (minMiss < Infinity) lastMissAngle = minMiss;
 
   // ── CHART PUSH every ~50 ms sim-time ─────────────────────────
   if (simTime - lastChartPush >= 0.05) {
@@ -1058,7 +1079,7 @@ function simStep(dt) {
   // Update OSD
   El('ov-t').textContent=simTime.toFixed(3);
   El('ov-r').textContent=curRange.toFixed(2);
-  El('ov-a').textContent=((rotAng*180/Math.PI)%360).toFixed(1);
+  El('ov-a').textContent=((rotAngDisplay*180/Math.PI)%360).toFixed(1);
   El('ov-c').textContent=closing.toFixed(1);
   El('ov-p').textContent=P('sl-srate').toFixed(0);
   El('ov-pitch').textContent=(bodyPitch/DEG).toFixed(1);
@@ -1318,8 +1339,8 @@ function applyUAVPreset(key) {
 //  ORBIT CAMERA
 // ═══════════════════════════════════════════════════════════════
 let drag=false, pmx=0, pmy=0;
-let sph={th:-0.6,ph:0.85,r:30};
-const camTarget=new THREE.Vector3(4,0,8);
+let sph={th:-0.6,ph:0.85,r:12};
+const camTarget=new THREE.Vector3(0,0,2);
 
 canvas3d.addEventListener('mousedown',e=>{drag=true;pmx=e.clientX;pmy=e.clientY;});
 canvas3d.addEventListener('mouseup',  ()=>drag=false);
