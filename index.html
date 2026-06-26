@@ -351,11 +351,11 @@ const interceptorGroup = new THREE.Group();
 scene.add(interceptorGroup);
 
 // We build body parts once; radius-dependent parts rebuilt on change
-let bodyMesh, noseMesh, finMeshes = [], rodMeshes = [];
+let bodyMesh, noseMesh, rollMarker, finMeshes = [], rodMeshes = [];
 
 function buildInterceptorBody() {
   // Remove old
-  [bodyMesh, noseMesh, ...finMeshes, ...rodMeshes].forEach(m => m && interceptorGroup.remove(m));
+  [bodyMesh, noseMesh, rollMarker, ...finMeshes, ...rodMeshes].filter(Boolean).forEach(m => interceptorGroup.remove(m));
   finMeshes = []; rodMeshes = [];
 
   const R = P('sl-ir') / 100; // convert cm → m
@@ -389,6 +389,13 @@ function buildInterceptorBody() {
   ring.rotation.x = Math.PI / 2;
   ring.position.z = 1.0; // sensor z position on body
   interceptorGroup.add(ring);
+
+  // Orange roll-reference stripe — rotates visibly with body roll
+  rollMarker = new THREE.Mesh(
+    new THREE.BoxGeometry(R * 0.25, R * 0.25, bodyLen + 0.4),
+    new THREE.MeshPhongMaterial({ color: 0xff6600, emissive: 0x882200, shininess: 60 }));
+  rollMarker.position.set(0, R * 0.9, 0);
+  interceptorGroup.add(rollMarker);
 
   buildRods();
 }
@@ -431,6 +438,8 @@ const sensorPivotGroup = new THREE.Group();
 sensorRotGroup.add(sensorPivotGroup);
 
 let sensorBoxMesh, lens1, lens2, fovConeMesh, fovRimMesh;
+let fovConeColorAttr = null, fovConePosAttr = null;
+const N_FOV_SECTORS = 72;
 let sweptMesh = null;
 
 // Sensor body is modeled as 4cm(X) × 2cm(Y) × 6cm(Z) in local space
@@ -466,37 +475,92 @@ function buildFovCone() {
   if (fovConeMesh) sensorPivotGroup.remove(fovConeMesh);
   if (fovRimMesh)  sensorPivotGroup.remove(fovRimMesh);
   fovConeMesh = null; fovRimMesh = null;
+  fovConeColorAttr = null; fovConePosAttr = null;
   if (!El('chk-fov').checked) return;
 
-  const D = P('sl-fov') * DEG;
-  const half = D / 2;
+  const D_half = P('sl-fov') / 2 * DEG;
   const L = P('sl-rng');
-  const r = Math.tan(half) * L;
+  const r = Math.tan(D_half) * L;
 
-  const geo = new THREE.ConeGeometry(r, L, 48, 1, true);
-  geo.translate(0, -L / 2, 0);
-  geo.rotateX(-Math.PI / 2); // apex at origin, cone extends along +Z
+  // Segmented cone: each sector is one triangle so it can be collapsed for rod holes
+  // Vertex 0 = apex at sensor front face; vertices 1..N+1 = rim
+  const pos = [], cols = [], idx = [];
+  pos.push(0, 0, SZ / 2);      // apex (local sensor space)
+  cols.push(0, 0.8, 1);
+  for (let i = 0; i <= N_FOV_SECTORS; i++) {
+    const phi = (i / N_FOV_SECTORS) * Math.PI * 2;
+    pos.push(Math.sin(D_half) * Math.cos(phi) * L,
+             Math.sin(D_half) * Math.sin(phi) * L,
+             SZ / 2 + Math.cos(D_half) * L);
+    cols.push(0, 0.8, 1);
+  }
+  for (let i = 0; i < N_FOV_SECTORS; i++) idx.push(0, i + 1, i + 2);
 
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0x00c8ff, transparent: true, opacity: 0.07,
+  const geo = new THREE.BufferGeometry();
+  const pAttr = new THREE.Float32BufferAttribute(pos, 3);
+  pAttr.setUsage(35048); // DYNAMIC_DRAW
+  geo.setAttribute('position', pAttr);
+  const cAttr = new THREE.Float32BufferAttribute(cols, 3);
+  cAttr.setUsage(35048);
+  geo.setAttribute('color', cAttr);
+  geo.setIndex(idx);
+  fovConePosAttr  = pAttr;
+  fovConeColorAttr = cAttr;
+
+  fovConeMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.35,
     side: THREE.DoubleSide, depthWrite: false
-  });
-  fovConeMesh = new THREE.Mesh(geo, mat);
-  // Offset apex to front face of sensor box
-  fovConeMesh.position.z = SZ / 2;
+  }));
   sensorPivotGroup.add(fovConeMesh);
 
-  // Cone wireframe rim
-  const rimGeo = new THREE.RingGeometry(r - 0.05, r + 0.05, 48);
+  // Rim ring
+  const rimGeo = new THREE.RingGeometry(r * 0.95, r * 1.05, N_FOV_SECTORS);
   rimGeo.rotateX(Math.PI / 2);
-  const rimMat = new THREE.MeshBasicMaterial({ color: 0x00c8ff, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
-  fovRimMesh = new THREE.Mesh(rimGeo, rimMat);
+  fovRimMesh = new THREE.Mesh(rimGeo, new THREE.MeshBasicMaterial({
+    color: 0x00c8ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide
+  }));
   fovRimMesh.position.z = SZ / 2 + L;
   sensorPivotGroup.add(fovRimMesh);
 }
 
+// Called every frame — collapses sectors where rods block the ray
+function updateFovConeColors() {
+  if (!fovConeColorAttr || !fovConePosAttr || !fovConeMesh) return;
+  interceptorGroup.updateMatrixWorld(true);
+  const m4 = sensorPivotGroup.matrixWorld;
+  // Sensor origin in world space
+  const orig = new THREE.Vector3(0, 0, SZ / 2).applyMatrix4(m4);
+  const D_half = P('sl-fov') / 2 * DEG;
+  const L = P('sl-rng');
+  const carr = fovConeColorAttr.array;
+  const parr = fovConePosAttr.array;
+
+  for (let i = 0; i <= N_FOV_SECTORS; i++) {
+    const phi = (i / N_FOV_SECTORS) * Math.PI * 2;
+    // Rim point in LOCAL sensor space
+    const lx = Math.sin(D_half) * Math.cos(phi) * L;
+    const ly = Math.sin(D_half) * Math.sin(phi) * L;
+    const lz = SZ / 2 + Math.cos(D_half) * L;
+    // Same point in WORLD space (for occlusion check)
+    const wp = new THREE.Vector3(lx, ly, lz).applyMatrix4(m4);
+    const blocked = isOccludedByRod(orig, wp);
+    const vi = (i + 1) * 3; // skip apex at index 0
+
+    if (blocked) {
+      // Collapse rim vertex to apex in local space → triangle has zero area → invisible
+      parr[vi] = 0; parr[vi + 1] = 0; parr[vi + 2] = SZ / 2;
+      carr[vi] = 0.5; carr[vi + 1] = 0; carr[vi + 2] = 0;
+    } else {
+      parr[vi] = lx; parr[vi + 1] = ly; parr[vi + 2] = lz;
+      carr[vi] = 0; carr[vi + 1] = 0.8; carr[vi + 2] = 1;
+    }
+  }
+  fovConeColorAttr.needsUpdate = true;
+  fovConePosAttr.needsUpdate = true;
+}
+
 function buildSweptVolume() {
-  if (sweptMesh) { scene.remove(sweptMesh); sweptMesh = null; }
+  if (sweptMesh) { interceptorGroup.remove(sweptMesh); sweptMesh = null; }
   clearSweptOutlines();
   if (!El('chk-swept').checked) return;
   if (simStage !== 2) return;
@@ -561,8 +625,8 @@ function buildSweptVolume() {
     side: THREE.DoubleSide, depthWrite: false
   });
   sweptMesh = new THREE.Mesh(geo, mat);
-  sweptMesh.position.z = 1.0; // sensor Z on interceptor
-  scene.add(sweptMesh);
+  sweptMesh.position.z = 1.0; // sensor Z in interceptorGroup local space
+  interceptorGroup.add(sweptMesh);
 
   // Outline rings at max range
   for (let ring = 0; ring < 2; ring++) {
@@ -580,14 +644,14 @@ function buildSweptVolume() {
       color: ring === 0 ? 0x0080ff : 0x004088, transparent: true, opacity: 0.35
     }));
     rLine.position.z = 1.0;
-    scene.add(rLine);
+    interceptorGroup.add(rLine);
     sweptOutlines.push(rLine);
   }
 }
 
 let sweptOutlines = [];
 function clearSweptOutlines() {
-  sweptOutlines.forEach(l => scene.remove(l));
+  sweptOutlines.forEach(l => interceptorGroup.remove(l));
   sweptOutlines = [];
 }
 
@@ -769,6 +833,31 @@ function checkDetection(sensorOrigin, boresight) {
 // ═══════════════════════════════════════════════════════
 let simRunning = false;
 let bodyPitch = 0, bodyYaw = 0, bodyRoll = 0;
+
+// Pulse beam flash — red line shown briefly after each detection
+let pulseBeamLine = null;
+let pulseFlashWall = -9999; // wall-clock ms of last pulse
+
+function ensurePulseBeam() {
+  if (pulseBeamLine) return;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute([0,0,0, 0,0,1], 3));
+  pulseBeamLine = new THREE.Line(geo,
+    new THREE.LineBasicMaterial({ color: 0xff2200, transparent: true, opacity: 1 }));
+  pulseBeamLine.visible = false;
+  scene.add(pulseBeamLine);
+}
+
+function updatePulseBeam(origin, dir, len) {
+  ensurePulseBeam();
+  const end = origin.clone().addScaledVector(dir, len);
+  const pos = pulseBeamLine.geometry.attributes.position;
+  pos.setXYZ(0, origin.x, origin.y, origin.z);
+  pos.setXYZ(1, end.x, end.y, end.z);
+  pos.needsUpdate = true;
+  pulseFlashWall = Date.now();
+  pulseBeamLine.visible = true;
+}
 let simTime = 0;
 let simStage = 1;
 let sensorRotAngle = 0;
@@ -800,7 +889,7 @@ function resetSim() {
   if (trackLine) { scene.remove(trackLine); trackLine = null; }
   detRays.forEach(r => scene.remove(r.line)); detRays.length = 0;
   clearSweptOutlines();
-  if (sweptMesh) { scene.remove(sweptMesh); sweptMesh = null; }
+  if (sweptMesh) { interceptorGroup.remove(sweptMesh); sweptMesh = null; }
 
   // Set target initial position and velocity
   const R0 = P('sl-tr0');
@@ -894,6 +983,7 @@ function simStep(dt) {
     detFrames++;
     if (firstDetT === null) firstDetT = simTime;
     if (closestPt) addDetRay(origin, closestPt);
+    updatePulseBeam(origin, boresight, P('sl-rng'));
   }
 
   prevRange = curRange;
@@ -1031,7 +1121,7 @@ function updateStageUI() {
     : 'Sensor fixed at mount angle X and azimuth φ₀. FOV cone D covers a sector. Evaluate single-position coverage.';
   El('panel-rot').style.opacity = isS2 ? '1' : '0.4';
   clearSweptOutlines();
-  if (sweptMesh) { scene.remove(sweptMesh); sweptMesh = null; }
+  if (sweptMesh) { interceptorGroup.remove(sweptMesh); sweptMesh = null; }
   buildSweptVolume();
 }
 
@@ -1098,6 +1188,18 @@ function animate(ts) {
   // Gentle lens pulse
   if (lens1) lens1.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(Date.now() * 0.01);
 
+  // Fade pulse beam over 60 ms wall-clock
+  if (pulseBeamLine && pulseBeamLine.visible) {
+    const age = Date.now() - pulseFlashWall;
+    const FLASH_MS = 60;
+    if (age >= FLASH_MS) {
+      pulseBeamLine.visible = false;
+    } else {
+      pulseBeamLine.material.opacity = 1 - age / FLASH_MS;
+    }
+  }
+
+  updateFovConeColors();
   updateCamera();
   renderer.render(scene, camera);
 }
