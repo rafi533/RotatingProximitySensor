@@ -308,6 +308,19 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
       <input type="range" id="sl-ts" min="0.05" max="5" step="0.05" value="1">
       <span class="val" id="vl-ts">1.0</span><span class="unit">×</span>
     </div>
+    <div class="chk-row" style="margin-top:6px;">
+      <input type="checkbox" id="chk-repeat">
+      <label for="chk-repeat">Auto-repeat every</label>
+      <input type="number" id="num-repeat" value="10" min="1" max="300" step="1"
+             style="width:40px;background:#080c12;border:1px solid #1a3050;color:#c0d0e0;font-size:10px;padding:2px 4px;border-radius:3px;">
+      <span style="font-size:10px;color:#3d6080;">s</span>
+    </div>
+    <div class="row" style="margin-top:4px;">
+      <span class="lbl">Max loops (0=∞)</span>
+      <input type="number" id="num-loops" value="0" min="0" max="999" step="1"
+             style="width:50px;background:#080c12;border:1px solid #1a3050;color:#c0d0e0;font-size:10px;padding:2px 4px;border-radius:3px;">
+      <span style="font-size:10px;color:#29b6f6;margin-left:8px;">Loop <span id="m-loop">0</span></span>
+    </div>
   </div>
 
 </div><!-- sidebar -->
@@ -847,6 +860,7 @@ let simRunning = false;
 let bodyPitch = 0, bodyYaw = 0, bodyRoll = 0;
 let pulseClock = 0, totalPulses = 0;
 let lastDetectedFlag = false, lastRodBlockedFlag = false;
+let loopCount = 0;
 
 // Pulse beam flash — red line shown briefly after each detection
 let pulseBeamLine = null;
@@ -1059,12 +1073,23 @@ function simStep(dt) {
   totalFrames++;
   drawPlots();
 
-  // Stop at very close range
-  if (curRange < 0.3) {
-    simRunning = false;
-    El('btn-ss').textContent = '▶  START SIMULATION';
-    El('btn-ss').className = 'cbtn';
-    El('d-sim').className = 'dot';
+  // End of run: close range OR repeat interval elapsed
+  const repeatOn  = El('chk-repeat').checked;
+  const repeatInt = parseFloat(El('num-repeat').value) || 10;
+  const maxLoops  = parseInt(El('num-loops').value) || 0;
+  const endOfRun  = curRange < 0.3 || (repeatOn && simTime >= repeatInt);
+  if (endOfRun) {
+    loopCount++;
+    El('m-loop').textContent = loopCount;
+    const hitMax = maxLoops > 0 && loopCount >= maxLoops;
+    if (repeatOn && !hitMax) {
+      resetSim(); // resets simTime/state but preserves loopCount
+    } else {
+      simRunning = false;
+      El('btn-ss').textContent = '▶  START SIMULATION';
+      El('btn-ss').className = 'cbtn';
+      El('d-sim').className = 'dot';
+    }
   }
 }
 
@@ -1357,9 +1382,11 @@ El('btn-ss').addEventListener('click', () => {
 
 El('btn-rst').addEventListener('click', () => {
   simRunning = false;
-  El('btn-ss').textContent = '▶  START SIMULATION';
-  El('btn-ss').className   = 'cbtn';
-  El('d-sim').className    = 'dot';
+  loopCount = 0;
+  El('m-loop').textContent  = '0';
+  El('btn-ss').textContent  = '▶  START SIMULATION';
+  El('btn-ss').className    = 'cbtn';
+  El('d-sim').className     = 'dot';
   resetSim();
 });
 
