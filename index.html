@@ -297,6 +297,11 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
     <button class="cbtn" id="btn-ss">▶  START SIMULATION</button>
     <button class="cbtn reset" id="btn-rst">↺  RESET</button>
     <div class="row" style="margin-top:6px;">
+      <span class="lbl">Chart window</span>
+      <input type="range" id="sl-cwin" min="0.1" max="10" step="0.1" value="0.4">
+      <span class="val" id="vl-cwin">0.4</span><span class="unit">s</span>
+    </div>
+    <div class="row">
       <span class="lbl">Time scale</span>
       <input type="range" id="sl-ts" min="0.05" max="5" step="0.05" value="0.1">
       <span class="val" id="vl-ts">0.1</span><span class="unit">×</span>
@@ -1104,7 +1109,7 @@ function simStep(dt) {
 // ═══════════════════════════════════════════════════════
 //  CHART.JS CHARTS
 // ═══════════════════════════════════════════════════════
-const CHART_WIN = 30; // seconds of history shown
+let CHART_WIN = 0.4; // seconds visible on chart X axis (driven by slider)
 
 // Real-time marker: vertical dashed white line at current simTime
 const realtimeLinePlugin = {
@@ -1394,6 +1399,7 @@ wireSlider('sl-tr0',  'vl-tr0',  0);
 wireSlider('sl-oy',   'vl-oy',   1);
 wireSlider('sl-oz',   'vl-oz',   1);
 wireSlider('sl-ts',   'vl-ts',   1);
+wireSlider('sl-cwin', 'vl-cwin', 1, () => { CHART_WIN = P('sl-cwin'); });
 
 El('sel-sc').addEventListener('change', () => { updateScenarioNote(); if (!simRunning) resetSim(); });
 
