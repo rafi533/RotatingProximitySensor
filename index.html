@@ -45,8 +45,11 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
 .mval.y { color: #ffd600; }
 .mlbl { font-size: 8px; color: #3d6080; text-transform: uppercase; letter-spacing: .8px; margin-top: 2px; }
 
-#det-canvas { width: 100%; height: 52px; display: block; background: #050810; border: 1px solid #1a3050; border-radius: 2px; margin-top: 5px; }
-#rng-canvas { width: 100%; height: 70px; display: block; background: #050810; border: 1px solid #1a3050; border-radius: 2px; margin-top: 5px; }
+.chart-wrap { position: relative; background: #050810; border: 1px solid #1a3050; border-radius: 2px; margin-top: 5px; }
+.chart-cv { display: block; width: 100% !important; }
+#det-canvas { height: 52px; }
+#rng-canvas { height: 80px; }
+#ang-canvas { height: 80px; }
 
 .toggle-row { display: flex; gap: 6px; margin-bottom: 6px; }
 .tbtn { flex: 1; padding: 5px 2px; background: #080c12; border: 1px solid #1a3050; color: #5a7a9a; font-size: 10px; cursor: pointer; border-radius: 3px; text-align: center; transition: all .15s; font-family: inherit; }
@@ -287,10 +290,12 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
       <div class="mbox"><div class="mval" id="m-1st">---</div><div class="mlbl">1st Det (s)</div></div>
       <div class="mbox"><div class="mval" id="m-cl">---</div><div class="mlbl">Close m/s</div></div>
     </div>
-    <div style="font-size:9px;color:#3d6080;margin-top:6px;">Detection timeline (last 2 s)</div>
-    <canvas id="det-canvas"></canvas>
     <div style="font-size:9px;color:#3d6080;margin-top:6px;">Range to target (m)</div>
-    <canvas id="rng-canvas"></canvas>
+    <div class="chart-wrap"><canvas id="rng-canvas" class="chart-cv" height="80"></canvas></div>
+    <div style="font-size:9px;color:#3d6080;margin-top:6px;">Angular miss vs FOV/2 (°)</div>
+    <div class="chart-wrap"><canvas id="ang-canvas" class="chart-cv" height="80"></canvas></div>
+    <div style="font-size:9px;color:#3d6080;margin-top:6px;">Detection timeline (last 2 s)</div>
+    <div class="chart-wrap"><canvas id="det-canvas" class="chart-cv" height="52"></canvas></div>
   </div>
 
   <!-- CONTROL -->
@@ -309,6 +314,7 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
 </div><!-- main -->
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════
 //  HELPERS
@@ -840,6 +846,7 @@ function checkDetection(sensorOrigin, boresight) {
 let simRunning = false;
 let bodyPitch = 0, bodyYaw = 0, bodyRoll = 0;
 let pulseClock = 0, totalPulses = 0;
+let lastDetectedFlag = false, lastRodBlockedFlag = false;
 
 // Pulse beam flash — red line shown briefly after each detection
 let pulseBeamLine = null;
@@ -953,6 +960,10 @@ function resetSim() {
   El('ov-t').textContent = '0.000';
   El('ov-r').textContent = '---';
   El('ov-c').textContent = '---';
+  lastMissAngle = 0; lastChartPush = 0; rateHistory = [];
+  if (rngChart) { rngChart.data.datasets.forEach(d => d.data = []); rngChart.update('none'); }
+  if (angChart) { angChart.data.datasets.forEach(d => d.data = []); angChart.update('none'); }
+  if (detChart) { detChart.data.datasets.forEach(d => d.data = []); detChart.update('none'); }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -989,7 +1000,7 @@ function simStep(dt) {
   // ── LIDAR PULSES at configured sample rate ───────────────
   pulseClock += dt;
   const pulseInterval = 1.0 / P('sl-srate');
-  let lastDetected = false, lastRodBlocked = false;
+  lastDetectedFlag = false; lastRodBlockedFlag = false;
 
   while (pulseClock >= pulseInterval) {
     pulseClock -= pulseInterval;
@@ -1001,16 +1012,21 @@ function simStep(dt) {
       if (firstDetT === null) firstDetT = simTime;
       if (closestPt) addDetRay(origin, closestPt);
       updatePulseBeam(origin, boresight, P('sl-rng'));
-      lastDetected = true;
+      lastDetectedFlag = true;
     }
-    if (rodBlocked) lastRodBlocked = true;
+    if (rodBlocked) lastRodBlockedFlag = true;
   }
 
-  // History
+  // Angular miss: angle from boresight to target centre
+  const toTgt = new THREE.Vector3().subVectors(targetGroup.position, origin);
+  if (toTgt.length() > 0.01)
+    lastMissAngle = Math.acos(Math.max(-1, Math.min(1, toTgt.normalize().dot(boresight)))) / DEG;
+
+  // History (legacy ring buffers — kept for potential future use)
   histTimer += dt;
   while (histTimer >= H_DT) {
     histTimer -= H_DT;
-    detHist[histIdx % H] = lastDetected ? 1 : (lastRodBlocked ? 0.5 : 0);
+    detHist[histIdx % H] = lastDetectedFlag ? 1 : (lastRodBlockedFlag ? 0.5 : 0);
     rngHist[histIdx % H] = curRange;
     histIdx++;
   }
@@ -1036,8 +1052,8 @@ function simStep(dt) {
   El('ov-yaw').textContent   = (bodyYaw   / DEG).toFixed(1);
   El('ov-roll').textContent  = (bodyRoll  / DEG).toFixed(1);
 
-  El('d-hit').className = 'dot' + (lastDetected ? ' hit' : '');
-  El('d-rod').className = 'dot' + (lastRodBlocked && !lastDetected ? ' warn' : '');
+  El('d-hit').className = 'dot' + (lastDetectedFlag ? ' hit' : '');
+  El('d-rod').className = 'dot' + (lastRodBlockedFlag && !lastDetectedFlag ? ' warn' : '');
   El('d-sim').className = 'dot on';
 
   totalFrames++;
@@ -1053,48 +1069,105 @@ function simStep(dt) {
 }
 
 // ═══════════════════════════════════════════════════════
-//  PLOTS
+//  CHART.JS CHARTS
 // ═══════════════════════════════════════════════════════
+const CHART_CFG = {
+  animation: false,
+  responsive: false,
+  plugins: { legend: { display: false } },
+  scales: {
+    x: { type: 'linear', ticks: { color: '#3d6080', font: { size: 8 } }, grid: { color: '#0d1e30' } },
+    y: { ticks: { color: '#3d6080', font: { size: 8 } }, grid: { color: '#0d1e30' } }
+  }
+};
+
+let rngChart = null, angChart = null, detChart = null;
+let lastMissAngle = 0;
+
+function initCharts() {
+  Chart.defaults.color = '#3d6080';
+  Chart.defaults.borderColor = '#0d1e30';
+
+  rngChart = new Chart(El('rng-canvas'), {
+    type: 'line',
+    data: {
+      datasets: [
+        { label: 'Range', data: [], borderColor: '#29b6f6', borderWidth: 1.5, pointRadius: 0, tension: 0 },
+        { label: 'Det',   data: [], borderColor: 'transparent', backgroundColor: '#00e67688',
+          pointRadius: 3, pointStyle: 'circle', showLine: false }
+      ]
+    },
+    options: { ...CHART_CFG, scales: { ...CHART_CFG.scales,
+      x: { ...CHART_CFG.scales.x, title: { display: false } },
+      y: { ...CHART_CFG.scales.y, min: 0 }
+    }}
+  });
+
+  angChart = new Chart(El('ang-canvas'), {
+    type: 'line',
+    data: {
+      datasets: [
+        { label: 'Miss°', data: [], borderColor: '#ffd600', borderWidth: 1.5, pointRadius: 0, tension: 0 },
+        { label: 'FOV/2', data: [], borderColor: '#ff444488', borderWidth: 1,
+          borderDash: [4, 3], pointRadius: 0, tension: 0 }
+      ]
+    },
+    options: { ...CHART_CFG, scales: { ...CHART_CFG.scales,
+      y: { ...CHART_CFG.scales.y, min: 0 }
+    }}
+  });
+
+  detChart = new Chart(El('det-canvas'), {
+    type: 'bar',
+    data: {
+      datasets: [
+        { label: 'Det rate', data: [], backgroundColor: '#00e67688', barPercentage: 1, categoryPercentage: 1 },
+        { label: 'Blocked',  data: [], backgroundColor: '#ff525244', barPercentage: 1, categoryPercentage: 1 }
+      ]
+    },
+    options: { ...CHART_CFG,
+      scales: { ...CHART_CFG.scales, x: { ...CHART_CFG.scales.x, type: 'linear', offset: false }, y: { ...CHART_CFG.scales.y, min: 0 } }
+    }
+  });
+}
+
+const RATE_WIN = 0.5; // rolling window in seconds
+let rateHistory = [], lastChartPush = 0;
+
 function drawPlots() {
-  const dc = El('det-canvas'), rc = El('rng-canvas');
-  const dctx = dc.getContext('2d'), rctx = rc.getContext('2d');
-  const dw = dc.width, dh = dc.height;
-  const rw = rc.width, rh = rc.height;
+  // Push new data point every ~50ms sim-time
+  if (simTime - lastChartPush < 0.05) return;
+  lastChartPush = simTime;
 
-  dctx.clearRect(0, 0, dw, dh);
-  const bw = dw / H;
-  for (let i = 0; i < H; i++) {
-    const age = (histIdx - H + i + H) % H;
-    const v = detHist[age];
-    if (v === 0) continue;
-    dctx.fillStyle = v === 1 ? '#00e676' : '#444455';
-    dctx.fillRect(i * bw, 0, Math.max(1, bw), dh);
+  // Chart 1: range + detection scatter
+  if (rngChart) {
+    rngChart.data.datasets[0].data.push({ x: simTime, y: curRange });
+    if (lastDetectedFlag) rngChart.data.datasets[1].data.push({ x: simTime, y: curRange });
+    for (const ds of rngChart.data.datasets) if (ds.data.length > 2000) ds.data.shift();
+    rngChart.update('none');
   }
-  // Border line
-  dctx.strokeStyle = '#1a3050'; dctx.lineWidth = 1;
-  dctx.strokeRect(0, 0, dw, dh);
-  dctx.fillStyle = '#2a4060'; dctx.font = '8px monospace';
-  dctx.fillText('─2s', 2, dh - 2); dctx.fillText('now', dw - 22, dh - 2);
 
-  rctx.clearRect(0, 0, rw, rh);
-  const maxRng = P('sl-rng') * 2;
-  rctx.strokeStyle = '#29b6f6'; rctx.lineWidth = 1.5;
-  rctx.beginPath();
-  for (let i = 0; i < H; i++) {
-    const age = (histIdx - H + i + H) % H;
-    const r = rngHist[age];
-    const x = (i / H) * rw;
-    const y = rh - (r / maxRng) * rh;
-    i === 0 ? rctx.moveTo(x, y) : rctx.lineTo(x, y);
+  // Chart 2: angular miss vs FOV/2
+  if (angChart) {
+    angChart.data.datasets[0].data.push({ x: simTime, y: lastMissAngle });
+    if (angChart.data.datasets[0].data.length > 2000) angChart.data.datasets[0].data.shift();
+    const fovHalf = P('sl-fov') / 2;
+    angChart.data.datasets[1].data = [{ x: 0, y: fovHalf }, { x: simTime + 10, y: fovHalf }];
+    angChart.update('none');
   }
-  rctx.stroke();
-  // Max range dashed line
-  const maxY = rh - (P('sl-rng') / maxRng) * rh;
-  rctx.strokeStyle = '#1a3050'; rctx.lineWidth = 1; rctx.setLineDash([3, 3]);
-  rctx.beginPath(); rctx.moveTo(0, maxY); rctx.lineTo(rw, maxY); rctx.stroke();
-  rctx.setLineDash([]);
-  rctx.fillStyle = '#2a4060'; rctx.font = '8px monospace';
-  rctx.fillText('max', 2, maxY - 2);
+
+  // Chart 3: rolling detection rate
+  rateHistory.push({ t: simTime, det: lastDetectedFlag ? 1 : 0, blk: lastRodBlockedFlag && !lastDetectedFlag ? 1 : 0 });
+  while (rateHistory.length && rateHistory[0].t < simTime - RATE_WIN) rateHistory.shift();
+  if (detChart) {
+    const win = Math.max(RATE_WIN, simTime < RATE_WIN ? simTime : RATE_WIN);
+    const detSum = rateHistory.reduce((a, e) => a + e.det, 0);
+    const blkSum = rateHistory.reduce((a, e) => a + e.blk, 0);
+    detChart.data.datasets[0].data.push({ x: simTime, y: detSum / win });
+    detChart.data.datasets[1].data.push({ x: simTime, y: blkSum / win });
+    for (const ds of detChart.data.datasets) if (ds.data.length > 2000) ds.data.shift();
+    detChart.update('none');
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1328,6 +1401,7 @@ El('btn-rst').addEventListener('click', () => {
 // ═══════════════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════════════
+initCharts();
 buildInterceptorBody();
 updateStageUI();
 resetSim();
