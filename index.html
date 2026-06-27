@@ -64,7 +64,7 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
 
 #ov { position: absolute; top: 8px; right: 8px; font-size: 10px; color: #29b6f6; pointer-events: none; line-height: 1.9; background: rgba(5,10,20,.75); padding: 6px 10px; border-radius: 4px; border: 1px solid #1a305033; }
 
-#det-table { position: absolute; top: 8px; left: 8px; pointer-events: none; background: rgba(5,10,20,.82); border: 1px solid #1a305066; border-radius: 4px; padding: 5px 8px; min-width: 190px; max-height: 320px; overflow: hidden; }
+#det-table { position: absolute; top: 8px; left: 8px; pointer-events: none; background: rgba(5,10,20,.82); border: 1px solid #1a305066; border-radius: 4px; padding: 5px 8px; min-width: 200px; max-height: 300px; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
 #det-table .dt-title { font-size: 9px; letter-spacing: 1.5px; color: #3d6080; text-transform: uppercase; margin-bottom: 4px; }
 #det-table table { border-collapse: collapse; width: 100%; }
 #det-table th { font-size: 9px; color: #3d6080; letter-spacing: 1px; padding: 2px 5px; text-align: right; border-bottom: 1px solid #1a3050; }
@@ -100,7 +100,7 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
 <div id="viewport">
   <canvas id="c3d"></canvas>
   <div id="det-table">
-    <div class="dt-title">Detections</div>
+    <div class="dt-title" id="det-table-title">Detections (0)</div>
     <table>
       <thead><tr><th>#</th><th>Time (s)</th><th>Dist (m)</th><th>Sensor</th></tr></thead>
       <tbody id="det-tbody"></tbody>
@@ -1220,15 +1220,20 @@ function initCharts() {
 function updateDetTable() {
   const tbody = El('det-tbody');
   if (!tbody) return;
+  // Update title with authoritative counter
+  const titleEl = El('det-table-title');
+  if (titleEl) titleEl.textContent = `Detections (${totalDet})`;
   tbody.innerHTML = '';
-  // Show newest at top — slice last 15
-  const show = detEvents.slice(-15).reverse();
+  const show = detEvents.slice(-40);
   show.forEach((ev, i) => {
     const tr = document.createElement('tr');
-    if (i === 0) tr.className = 'new-det';
-    tr.innerHTML = `<td>${detEvents.length - i}</td><td>${ev.t.toFixed(3)}</td><td>${ev.dist.toFixed(1)}</td><td>${ev.sensor}</td>`;
+    if (i === show.length - 1) tr.className = 'new-det';
+    tr.innerHTML = `<td>${i + 1}</td><td>${ev.t.toFixed(3)}</td><td>${ev.dist.toFixed(1)}</td><td>${ev.sensor}</td>`;
     tbody.appendChild(tr);
   });
+  // Auto-scroll to bottom (newest)
+  const wrap = El('det-table');
+  if (wrap) wrap.scrollTop = wrap.scrollHeight;
 }
 
 function drawPlots() {
