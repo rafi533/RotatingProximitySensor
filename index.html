@@ -23,7 +23,7 @@ canvas#c3d { width: 100%; height: 100%; display: block; }
 
 #resize-handle { width: 5px; flex-shrink: 0; background: #1a3050; cursor: col-resize; transition: background .15s; z-index: 10; }
 #resize-handle:hover, #resize-handle.dragging { background: #29b6f6; }
-#sidebar { width: 420px; flex-shrink: 0; background: #0b0f18; display: flex; flex-direction: column; overflow-y: auto; min-width: 250px; max-width: 840px; }
+#sidebar { width: 462px; flex-shrink: 0; background: #0b0f18; display: flex; flex-direction: column; overflow-y: auto; min-width: 250px; max-width: 840px; }
 .panel { border-bottom: 1px solid #152030; padding: 10px 12px; }
 .ptitle { font-size: 15px; color: #29b6f6; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
 .ptitle::before { content:''; width:2px; height:14px; background:#29b6f6; display:inline-block; }
@@ -46,6 +46,11 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
 .mlbl { font-size: 12px; color: #3d6080; text-transform: uppercase; letter-spacing: .8px; margin-top: 2px; }
 
 #bottom-panel { height: 160px; flex-shrink: 0; display: flex; padding: 6px 8px; gap: 8px; background: #0b0f18; border-top: 1px solid #1a3050; }
+.ctab { background: transparent; border: 1px solid #1a3050; color: #3d6080; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; padding: 2px 8px; border-radius: 3px; cursor: pointer; }
+.ctab.active { background: #0d1e30; border-color: #29b6f6; color: #29b6f6; }
+.cbody { display: none; position: absolute; inset: 0; }
+.cbody.active { display: block; }
+.cbody canvas { width: 100% !important; height: 100% !important; }
 .cpanel { flex: 1; display: flex; flex-direction: column; background: #050810; border: 1px solid #1a3050; border-radius: 3px; padding: 4px 6px; min-width: 0; }
 .cpanel-title { font-size: 13px; color: #3d6080; letter-spacing: 1px; text-transform: uppercase; flex-shrink: 0; margin-bottom: 3px; }
 
@@ -136,13 +141,17 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
     <div class="ptitle">Sensor (4×2×6 cm)</div>
     <div class="row">
       <span class="lbl">Mount angle X<br><span style="font-size:9px;color:#3d6080">(from flight axis)</span></span>
-      <input type="range" id="sl-x" min="10" max="80" step="1" value="10">
+      <input type="range" id="sl-x" min="0" max="90" step="1" value="10">
       <span class="val" id="vl-x">10</span><span class="unit">deg</span>
     </div>
     <div class="row">
       <span class="lbl">No. of lidars</span>
       <input type="range" id="sl-nl" min="1" max="8" step="1" value="4">
       <span class="val" id="vl-nl">4</span><span class="unit"></span>
+    </div>
+    <div id="per-lidar-wrap" style="margin:4px 0 2px 0; display:none;">
+      <div style="font-size:9px;color:#3d6080;margin-bottom:3px;letter-spacing:1px;text-transform:uppercase;">Per-lidar mount angle (deg)</div>
+      <div id="per-lidar-inputs" style="display:flex;flex-wrap:wrap;gap:4px;"></div>
     </div>
     <div class="row">
       <span class="lbl">Sensor FOV (D)<br><span style="font-size:9px;color:#3d6080">(full cone angle)</span></span>
@@ -254,7 +263,7 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
     </div>
     <div class="row">
       <span class="lbl">Speed</span>
-      <input type="range" id="sl-tv" min="0" max="1500" step="10" value="200">
+      <input type="range" id="sl-tv" min="0" max="1500" step="10" value="70">
       <span class="val" id="vl-tv">200</span><span class="unit">m/s</span>
     </div>
     <div class="row">
@@ -351,9 +360,19 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
 </div><!-- main -->
 
 <div id="bottom-panel">
-  <div class="cpanel">
-    <div class="cpanel-title">Detection over time &nbsp;<span style="color:#00e676">█ detected</span> &nbsp;<span style="color:#333">█ miss</span></div>
-    <canvas id="det-canvas" height="120"></canvas>
+  <div class="cpanel" style="flex:1;display:flex;flex-direction:column;min-width:0;">
+    <div style="display:flex;align-items:center;gap:2px;margin-bottom:4px;flex-shrink:0;">
+      <button class="ctab active" data-tab="det">Detection</button>
+      <button class="ctab" data-tab="range">Range</button>
+      <button class="ctab" data-tab="speed">Close Speed</button>
+      <button class="ctab" data-tab="sensors">Per Sensor</button>
+    </div>
+    <div style="position:relative;flex:1;min-height:0;">
+      <div class="cbody active" id="cbody-det"><canvas id="det-canvas"></canvas></div>
+      <div class="cbody" id="cbody-range"><canvas id="range-canvas"></canvas></div>
+      <div class="cbody" id="cbody-speed"><canvas id="speed-canvas"></canvas></div>
+      <div class="cbody" id="cbody-sensors"><canvas id="sensors-canvas"></canvas></div>
+    </div>
   </div>
 </div>
 
@@ -548,6 +567,7 @@ const SX = 0.08, SY = 0.04, SZ = 0.12; // sensor box dimensions (visual, ×4 exa
 let sensorSlots     = []; // {slotGroup, pivotGroup}
 let sensorData      = []; // {fovConeColorAttr, fovConePosAttr, fovConeMesh, fovRimMesh}
 let allLenses       = []; // all lens1 meshes across all lidars (for pulse animation)
+let sensorAngles    = []; // per-lidar mount angle in degrees
 
 // Keep a sensorPivotGroup alias pointing to the first sensor so legacy code still works
 let sensorPivotGroup = null;
@@ -606,12 +626,44 @@ function buildOneFovCone(pivotGroup) {
   return { fovConeMesh: coneMesh, fovRimMesh: rimMesh, fovConeColorAttr: cAttr, fovConePosAttr: pAttr };
 }
 
+function buildPerLidarUI() {
+  const N = Math.round(P('sl-nl')) || 1;
+  const wrap = El('per-lidar-wrap');
+  const cont = El('per-lidar-inputs');
+  if (N <= 1) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  cont.innerHTML = '';
+  const def = P('sl-x');
+  for (let i = 0; i < N; i++) {
+    if (sensorAngles[i] === undefined) sensorAngles[i] = def;
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:2px;';
+    label.innerHTML = `<span style="font-size:8px;color:#3d6080;">L${i+1}</span>`;
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.min = 0; inp.max = 90; inp.step = 1;
+    inp.value = sensorAngles[i];
+    inp.style.cssText = 'width:40px;background:#080c12;border:1px solid #1a3050;color:#29b6f6;font-size:11px;padding:2px 4px;border-radius:3px;text-align:center;';
+    inp.dataset.si = i;
+    inp.addEventListener('input', () => {
+      sensorAngles[parseInt(inp.dataset.si)] = parseFloat(inp.value) || 0;
+      updateSensorPoses(simRunning ? sensorRotAngle : P('sl-phi0') * DEG);
+    });
+    label.appendChild(inp);
+    cont.appendChild(label);
+  }
+}
+
 function buildAllSensors() {
   // Remove old slot groups
   for (const s of sensorSlots) sensorRotGroup.remove(s.slotGroup);
   sensorSlots = []; sensorData = []; allLenses = [];
 
   const N = Math.round(P('sl-nl')) || 1;
+  // Extend sensorAngles to cover N sensors; preserve existing values
+  const def = P('sl-x');
+  while (sensorAngles.length < N) sensorAngles.push(def);
+  buildPerLidarUI();
+
   for (let i = 0; i < N; i++) {
     const slotGroup = new THREE.Group();
     slotGroup.rotation.z = (i / N) * Math.PI * 2; // fixed azimuth offset
@@ -766,13 +818,14 @@ function clearSweptOutlines() {
 // ═══════════════════════════════════════════════════════
 // Position all N sensor pivot groups (each slotGroup already has azimuth offset baked in)
 function updateSensorPoses(rotAngle) {
-  const X = P('sl-x') * DEG;
+  const defaultX = P('sl-x') * DEG;
   const R_mount = P('sl-ir') / 100 + SX / 2 + 0.005;
   sensorRotGroup.rotation.z = rotAngle;
-  for (const { pivotGroup } of sensorSlots) {
+  sensorSlots.forEach(({ pivotGroup }, i) => {
+    const X = (sensorAngles[i] !== undefined ? sensorAngles[i] : P('sl-x')) * DEG;
     pivotGroup.position.set(R_mount, 0, 1.0);
     pivotGroup.rotation.set(0, X, 0);
-  }
+  });
 }
 
 // Return world-space {origin, boresight} for every sensor
@@ -1070,6 +1123,10 @@ function resetSim() {
   El('ov-c').textContent = '---';
   lastMissAngle = 0; lastChartPush = 0;
   if (detChart) { detChart.data.datasets.forEach(ds => ds.data = []); detChart.update('none'); }
+  if (rangeChart) { rangeChart.data.datasets.forEach(ds => ds.data = []); rangeChart.update('none'); }
+  if (speedChart) { speedChart.data.datasets.forEach(ds => ds.data = []); speedChart.update('none'); }
+  if (sensorsChart) { sensorsChart.data.datasets.forEach(ds => ds.data = []); sensorsChart.update('none'); }
+  lastRangeForSpeed = -1; lastRangeT = 0;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1217,44 +1274,136 @@ let detChart = null;
 let lastMissAngle = 0;
 let chartWin = 0.4; // seconds shown on X axis
 let lastChartPush = 0;
+let rangeChart = null, speedChart = null, sensorsChart = null;
+let lastRangeForSpeed = -1, lastRangeT = 0;
+
+const SENSOR_COLORS = ['#00e676','#29b6f6','#ff9800','#e040fb','#ffeb3b','#f44336','#00bcd4','#8bc34a'];
+
+const timeBarPlugin = {
+  id: 'timeBar',
+  beforeDraw(chart) {
+    const xScale = chart.scales.x;
+    if (!xScale || simTime <= 0) return;
+    const x = xScale.getPixelForValue(simTime);
+    if (x < xScale.left || x > xScale.right) return;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = '#ffe066';
+    ctx.globalAlpha = 0.7;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, chart.chartArea.top);
+    ctx.lineTo(x, chart.chartArea.bottom);
+    ctx.stroke();
+    ctx.restore();
+  }
+};
+
+function makeXAxis(win) {
+  return { type: 'linear', min: 0, max: win,
+    ticks: { color: '#3d6080', font: { size: 8 }, maxTicksLimit: 8 },
+    grid: { color: '#0d1e30' } };
+}
+function makeYAxis(min, max, label) {
+  return { min, max,
+    ticks: { color: '#3d6080', font: { size: 8 }, maxTicksLimit: 5 },
+    grid: { color: '#0d1e30' },
+    title: label ? { display: true, text: label, color: '#3d6080', font: { size: 8 } } : undefined };
+}
 
 function initCharts() {
-  const cv = El('det-canvas');
-  cv.width  = cv.parentElement.clientWidth  || 800;
-  cv.height = 120;
+  function size(id) {
+    const cv = El(id);
+    const p = cv.parentElement;
+    cv.width  = p.clientWidth  || 800;
+    cv.height = p.clientHeight || 120;
+    return cv;
+  }
 
-  detChart = new Chart(cv, {
+  // --- Detection chart ---
+  detChart = new Chart(size('det-canvas'), {
     type: 'scatter',
     data: { datasets: [
-      { // detected pulses — bright green
-        label: 'Det',
-        data: [],
-        backgroundColor: '#00e676',
-        pointRadius: 3,
-        pointHoverRadius: 3,
-      },
-      { // missed pulses — dim blue
-        label: 'Miss',
-        data: [],
-        backgroundColor: '#1a3a50',
-        pointRadius: 2,
-        pointHoverRadius: 2,
-      }
+      { label: 'Det',  data: [], backgroundColor: '#00e676', pointRadius: 3, pointHoverRadius: 3 },
+      { label: 'Miss', data: [], backgroundColor: '#1a3050', pointRadius: 2, pointHoverRadius: 2 }
     ]},
+    plugins: [timeBarPlugin],
     options: {
-      animation: false,
-      responsive: false,
+      animation: false, responsive: false,
+      plugins: { legend: { display: false } },
+      scales: { x: makeXAxis(chartWin), y: { min: -0.3, max: 1.3, ticks: { display: false }, grid: { color: '#0d1e30' } } }
+    }
+  });
+
+  // --- Range chart ---
+  rangeChart = new Chart(size('range-canvas'), {
+    type: 'line',
+    data: { datasets: [
+      { label: 'Range', data: [], borderColor: '#29b6f6', backgroundColor: 'rgba(41,182,246,0.08)',
+        borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0 }
+    ]},
+    plugins: [timeBarPlugin],
+    options: {
+      animation: false, responsive: false,
       plugins: { legend: { display: false } },
       scales: {
-        x: { type: 'linear', min: 0, max: chartWin,
-             ticks: { color: '#3d6080', font: { size: 8 }, maxTicksLimit: 8 },
-             grid: { color: '#0d1e30' } },
-        y: { min: -0.3, max: 1.3,
-             ticks: { display: false },
-             grid: { color: '#0d1e30' } }
+        x: makeXAxis(chartWin),
+        y: makeYAxis(0, null, 'Range (m)')
       }
     }
   });
+
+  // --- Closing speed chart ---
+  speedChart = new Chart(size('speed-canvas'), {
+    type: 'line',
+    data: { datasets: [
+      { label: 'Speed', data: [], borderColor: '#ff9800', backgroundColor: 'rgba(255,152,0,0.08)',
+        borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0 }
+    ]},
+    plugins: [timeBarPlugin],
+    options: {
+      animation: false, responsive: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: makeXAxis(chartWin),
+        y: makeYAxis(null, null, 'Speed (m/s)')
+      }
+    }
+  });
+
+  // --- Per-sensor detection chart ---
+  const N = Math.round(P('sl-nl')) || 1;
+  const sensorDs = Array.from({length: N}, (_, i) => ({
+    label: `S${i+1}`, data: [],
+    backgroundColor: SENSOR_COLORS[i % SENSOR_COLORS.length],
+    pointRadius: 4, pointHoverRadius: 4
+  }));
+  sensorsChart = new Chart(size('sensors-canvas'), {
+    type: 'scatter',
+    data: { datasets: sensorDs },
+    plugins: [timeBarPlugin],
+    options: {
+      animation: false, responsive: false,
+      plugins: { legend: { display: true, labels: { color: '#3d6080', font: { size: 8 }, boxWidth: 8 } } },
+      scales: {
+        x: makeXAxis(chartWin),
+        y: { min: 0.3, max: N + 0.7, ticks: { color: '#3d6080', font: { size: 8 }, stepSize: 1 }, grid: { color: '#0d1e30' } }
+      }
+    }
+  });
+}
+
+function rebuildSensorsChart() {
+  if (!sensorsChart) return;
+  const N = Math.round(P('sl-nl')) || 1;
+  sensorsChart.data.datasets = Array.from({length: N}, (_, i) => ({
+    label: `S${i+1}`, data: [],
+    backgroundColor: SENSOR_COLORS[i % SENSOR_COLORS.length],
+    pointRadius: 4, pointHoverRadius: 4
+  }));
+  sensorsChart.options.scales.y.max = N + 0.7;
+  sensorsChart.update('none');
 }
 
 function updateDetTable() {
@@ -1276,23 +1425,69 @@ function updateDetTable() {
   if (wrap) wrap.scrollTop = wrap.scrollHeight;
 }
 
+function setChartWindow(chart, xMax) {
+  chart.options.scales.x.min = xMax - chartWin;
+  chart.options.scales.x.max = xMax;
+}
+
+function trimData(arr, limit) { if (arr.length > limit) arr.splice(0, arr.length - limit); }
+
 function drawPlots() {
   if (!detChart) return;
-  // one point per pulse interval
   const pulseInterval = 1.0 / Math.max(1, P('sl-srate'));
   if (simTime - lastChartPush < pulseInterval * 0.9) return;
   lastChartPush = simTime;
+  const xMax = Math.max(chartWin, simTime);
 
+  // --- Detection chart ---
   const ds = lastDetectedFlag ? detChart.data.datasets[0] : detChart.data.datasets[1];
   ds.data.push({ x: simTime, y: lastDetectedFlag ? 1 : 0 });
-  if (ds.data.length > 5000) ds.data.shift();
-
-  // rolling X window
-  const xMax = Math.max(chartWin, simTime);
-  detChart.options.scales.x.min = xMax - chartWin;
-  detChart.options.scales.x.max = xMax;
-
+  trimData(ds.data, 5000);
+  setChartWindow(detChart, xMax);
   detChart.update('none');
+
+  // --- Range chart ---
+  if (rangeChart) {
+    const rd = rangeChart.data.datasets[0].data;
+    rd.push({ x: simTime, y: curRange });
+    trimData(rd, 5000);
+    // auto-scale Y to initial range
+    rangeChart.options.scales.y.max = P('sl-tr0') * 1.05;
+    setChartWindow(rangeChart, xMax);
+    rangeChart.update('none');
+  }
+
+  // --- Closing speed chart ---
+  if (speedChart) {
+    if (lastRangeForSpeed >= 0 && simTime > lastRangeT) {
+      const spd = (lastRangeForSpeed - curRange) / (simTime - lastRangeT);
+      const sd = speedChart.data.datasets[0].data;
+      sd.push({ x: simTime, y: Math.max(0, spd) });
+      trimData(sd, 5000);
+      setChartWindow(speedChart, xMax);
+      speedChart.update('none');
+    }
+    lastRangeForSpeed = curRange;
+    lastRangeT = simTime;
+  }
+
+  // --- Per-sensor chart (from recent detEvents) ---
+  if (sensorsChart && lastDetectedFlag) {
+    const recent = detEvents.filter(e => e.t === simTime || Math.abs(e.t - simTime) < pulseInterval);
+    for (const ev of recent) {
+      const si = ev.sensor - 1;
+      const dset = sensorsChart.data.datasets[si];
+      if (dset) {
+        dset.data.push({ x: ev.t, y: ev.sensor });
+        trimData(dset.data, 2000);
+      }
+    }
+    setChartWindow(sensorsChart, xMax);
+    sensorsChart.update('none');
+  } else if (sensorsChart) {
+    setChartWindow(sensorsChart, xMax);
+    sensorsChart.update('none');
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1381,11 +1576,13 @@ function resize() {
   camera.aspect = vp.clientWidth / vp.clientHeight;
   camera.updateProjectionMatrix();
 
-  // resize chart canvas to match its container width (height is fixed)
-  if (detChart) {
-    const cv = El('det-canvas');
-    const w = cv.parentElement.clientWidth || 800;
-    if (cv.width !== w) { cv.width = w; detChart.resize(); }
+  // resize all chart canvases to match their containers
+  for (const [id, chart] of [['det-canvas', detChart], ['range-canvas', rangeChart], ['speed-canvas', speedChart], ['sensors-canvas', sensorsChart]]) {
+    if (!chart) continue;
+    const cv = El(id);
+    const p = cv.parentElement;
+    const w = p.clientWidth || 800, h = p.clientHeight || 120;
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; chart.resize(); }
   }
 }
 window.addEventListener('resize', resize);
@@ -1431,10 +1628,17 @@ function animate(ts) {
 // ═══════════════════════════════════════════════════════
 //  WIRE UP CONTROLS
 // ═══════════════════════════════════════════════════════
-wireSlider('sl-x',    'vl-x',    0, () => { buildAllSensors(); buildSweptVolume(); updateInfoLabels(); if (!simRunning) updateSensorPoses(P('sl-phi0')*DEG); });
+wireSlider('sl-x',    'vl-x',    0, () => {
+  // Sync master angle to all per-lidar inputs
+  const def = P('sl-x');
+  sensorAngles = sensorAngles.map(() => def);
+  El('per-lidar-inputs').querySelectorAll('input').forEach(inp => inp.value = def);
+  buildAllSensors(); buildSweptVolume(); updateInfoLabels();
+  if (!simRunning) updateSensorPoses(P('sl-phi0')*DEG);
+});
 wireSlider('sl-fov',  'vl-fov',  1, () => { buildAllSensors(); buildSweptVolume(); updateInfoLabels(); });
 wireSlider('sl-rng',  'vl-rng',  0, () => { buildAllSensors(); buildSweptVolume(); updateInfoLabels(); });
-wireSlider('sl-nl',   'vl-nl',   0, () => { buildAllSensors(); updateSensorPoses(simRunning ? sensorRotAngle : P('sl-phi0') * DEG); });
+wireSlider('sl-nl',   'vl-nl',   0, () => { buildAllSensors(); updateSensorPoses(simRunning ? sensorRotAngle : P('sl-phi0') * DEG); rebuildSensorsChart(); });
 wireSlider('sl-rpm',   'vl-rpm',   0, updateInfoLabels);
 wireSlider('sl-srate', 'vl-srate', 0);
 wireSlider('sl-phi0', 'vl-phi0', 0, () => { if (!simRunning) updateSensorPoses(P('sl-phi0')*DEG); });
@@ -1509,6 +1713,20 @@ El('btn-next').addEventListener('click', () => {
   El('btn-ss').textContent = '⏸  PAUSE';
   El('btn-ss').className   = 'cbtn running';
   El('btn-next').style.display = 'none';
+});
+
+// ═══════════════════════════════════════════════════════
+//  CHART TABS
+// ═══════════════════════════════════════════════════════
+document.querySelectorAll('.ctab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.ctab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.cbody').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    El('cbody-' + btn.dataset.tab).classList.add('active');
+    // resize the newly visible chart so it fills its container
+    setTimeout(resize, 10);
+  });
 });
 
 // ═══════════════════════════════════════════════════════
