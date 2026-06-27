@@ -67,9 +67,9 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
 #det-table { position: absolute; top: 8px; left: 8px; pointer-events: none; background: rgba(5,10,20,.82); border: 1px solid #1a305066; border-radius: 4px; padding: 5px 8px; min-width: 200px; max-height: 300px; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
 #det-table .dt-title { font-size: 9px; letter-spacing: 1.5px; color: #3d6080; text-transform: uppercase; margin-bottom: 4px; }
 #det-table table { border-collapse: collapse; width: 100%; }
-#det-table th { font-size: 9px; color: #3d6080; letter-spacing: 1px; padding: 2px 5px; text-align: right; border-bottom: 1px solid #1a3050; }
+#det-table th { font-size: 18px; color: #3d6080; letter-spacing: 1px; padding: 2px 5px; text-align: right; border-bottom: 1px solid #1a3050; }
 #det-table th:first-child { text-align: left; }
-#det-table td { font-size: 10px; font-family: monospace; color: #29b6f6; padding: 1px 5px; text-align: right; }
+#det-table td { font-size: 20px; font-family: monospace; color: #29b6f6; padding: 1px 5px; text-align: right; }
 #det-table td:first-child { text-align: left; color: #3d6080; }
 #det-table tr.new-det td { color: #00e676; }
 #det-table tr.new-det td:first-child { color: #00e67688; }
@@ -125,8 +125,8 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
   <div class="panel">
     <div class="ptitle">Simulation Stage</div>
     <div class="toggle-row">
-      <div class="tbtn active" data-stage="1">Stage 1<br><span style="font-size:9px;color:#3d6080">Fixed sensor</span></div>
-      <div class="tbtn" data-stage="2">Stage 2<br><span style="font-size:9px;color:#3d6080">Rotating 360°</span></div>
+      <div class="tbtn" data-stage="1">Stage 1<br><span style="font-size:9px;color:#3d6080">Fixed sensor</span></div>
+      <div class="tbtn active" data-stage="2">Stage 2<br><span style="font-size:9px;color:#3d6080">Rotating 360°</span></div>
     </div>
     <div class="note" id="stage-note">Sensor fixed at mount angle X. FOV cone D covers a sector. Use to evaluate single-position coverage.</div>
   </div>
@@ -955,7 +955,7 @@ function updatePulseBeam(origin, dir, len) {
   pulseBeamLine.visible = true;
 }
 let simTime = 0;
-let simStage = 1;
+let simStage = 2;
 let sensorRotAngle = 0;
 let targetVel = new THREE.Vector3();
 let lastT = null;
@@ -1228,7 +1228,7 @@ function updateDetTable() {
   show.forEach((ev, i) => {
     const tr = document.createElement('tr');
     if (i === show.length - 1) tr.className = 'new-det';
-    tr.innerHTML = `<td>${i + 1}</td><td>${ev.t.toFixed(3)}</td><td>${ev.dist.toFixed(1)}</td><td>${ev.sensor}</td>`;
+    tr.innerHTML = `<td>${i + 1}</td><td>${ev.t.toFixed(5)}</td><td>${ev.dist.toFixed(2)}</td><td>${ev.sensor}</td>`;
     tbody.appendChild(tr);
   });
   // Auto-scroll to bottom (newest)
