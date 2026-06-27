@@ -465,7 +465,7 @@ let groundTex = null, groundMesh = null;
   const mat = new THREE.MeshBasicMaterial({ map: groundTex, transparent: true, opacity: 0.85, depthWrite: false });
   groundMesh = new THREE.Mesh(geo, mat);
   groundMesh.rotation.x = -Math.PI / 2;
-  groundMesh.position.y = -14;  // visible below engagement, represents 1000 m AGL
+  groundMesh.position.y = -120;  // far below, represents 1000 m AGL
   scene.add(groundMesh);
 })();
 
