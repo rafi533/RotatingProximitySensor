@@ -1616,7 +1616,7 @@ function animate(ts) {
 
   // Move ground mesh — wrap every 20 m (one tile) so it looks infinite
   if (groundMesh) {
-    if (groundTex) groundTex.offset.y = simTime * P('sl-iv') * 0.05;
+    if (groundTex) groundTex.offset.y = -simTime * P('sl-iv') * 0.05;
   }
 
   updateFovConeColors();
