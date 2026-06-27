@@ -1088,15 +1088,16 @@ function simStep(dt) {
     pulseClock -= pulseInterval;
     totalPulses++;
     let anyDetected = false, anyRodBlocked = false;
-    let firstDetSensor = -1, firstDetDist = 0;
     for (let si = 0; si < sensorWorlds.length; si++) {
       const { origin, boresight } = sensorWorlds[si];
       const { detected, rodBlocked, closestPt, closestDist } = checkDetection(origin, boresight);
       if (detected) {
-        if (!anyDetected) { firstDetSensor = si + 1; firstDetDist = closestDist ?? curRange; }
         anyDetected = true;
         if (closestPt) addDetRay(origin, closestPt);
         updatePulseBeam(origin, boresight, P('sl-rng'));
+        // Record one entry per detecting sensor
+        detEvents.push({ t: simTime, dist: closestDist ?? curRange, sensor: si + 1 });
+        if (detEvents.length > 400) detEvents.shift();
       }
       if (rodBlocked) anyRodBlocked = true;
     }
@@ -1104,9 +1105,6 @@ function simStep(dt) {
       totalDet++; detFrames++;
       if (firstDetT === null) firstDetT = simTime;
       lastDetectedFlag = true;
-      // Record every detection pulse
-      detEvents.push({ t: simTime, dist: firstDetDist, sensor: firstDetSensor });
-      if (detEvents.length > 200) detEvents.shift();
     }
     prevAnyDetected = anyDetected;
     if (anyRodBlocked) lastRodBlockedFlag = true;
