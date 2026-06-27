@@ -324,9 +324,14 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
     </div>
     <div class="row">
       <span class="lbl">Time scale</span>
-      <input type="range" id="sl-ts" min="0.05" max="5" step="0.05" value="0.1">
+      <input type="range" id="sl-ts" min="0.005" max="5" step="0.005" value="0.1">
       <span class="val" id="vl-ts">0.1</span><span class="unit">×</span>
     </div>
+    <div class="chk-row" style="margin-top:8px;">
+      <input type="checkbox" id="chk-step">
+      <label for="chk-step">Step on detection</label>
+    </div>
+    <button class="cbtn" id="btn-next" style="display:none;margin-top:4px;border-color:#ffe066;color:#ffe066;">⏭  NEXT DETECTION</button>
     <div class="chk-row" style="margin-top:6px;">
       <input type="checkbox" id="chk-repeat">
       <label for="chk-repeat">Auto-repeat every</label>
@@ -933,6 +938,8 @@ let loopCount = 0;
 // Pulse beam flash — red line shown briefly after each detection
 let pulseBeamLine = null;
 let pulseFlashWall = -9999; // wall-clock ms of last pulse
+let stepPaused = false;     // true when paused waiting for Next click
+let detSpotMesh = null;     // glowing sphere at detection hit point
 
 function ensurePulseBeam() {
   if (pulseBeamLine) return;
@@ -944,8 +951,9 @@ function ensurePulseBeam() {
   scene.add(pulseBeamLine);
 }
 
-function updatePulseBeam(origin, dir, len) {
+function updatePulseBeam(origin, dir, len, color) {
   ensurePulseBeam();
+  pulseBeamLine.material.color.set(color || 0xff2200);
   const end = origin.clone().addScaledVector(dir, len);
   const pos = pulseBeamLine.geometry.attributes.position;
   pos.setXYZ(0, origin.x, origin.y, origin.z);
@@ -953,6 +961,22 @@ function updatePulseBeam(origin, dir, len) {
   pos.needsUpdate = true;
   pulseFlashWall = Date.now();
   pulseBeamLine.visible = true;
+}
+
+function showDetSpot(pt) {
+  if (detSpotMesh) { scene.remove(detSpotMesh); detSpotMesh = null; }
+  const geo = new THREE.SphereGeometry(0.12, 12, 12);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffe066 });
+  detSpotMesh = new THREE.Mesh(geo, mat);
+  detSpotMesh.position.copy(pt);
+  scene.add(detSpotMesh);
+  // small point light at hit
+  const pl = new THREE.PointLight(0xffe066, 3, 5);
+  detSpotMesh.add(pl);
+}
+
+function clearDetSpot() {
+  if (detSpotMesh) { scene.remove(detSpotMesh); detSpotMesh = null; }
 }
 let simTime = 0;
 let simStage = 2;
@@ -1093,8 +1117,11 @@ function simStep(dt) {
       const { detected, rodBlocked, closestPt, closestDist } = checkDetection(origin, boresight);
       if (detected) {
         anyDetected = true;
+        const stepMode = El('chk-step').checked;
+        const beamColor = stepMode ? 0xffe066 : 0xff2200;
         if (closestPt) addDetRay(origin, closestPt);
-        updatePulseBeam(origin, boresight, P('sl-rng'));
+        updatePulseBeam(origin, boresight, P('sl-rng'), beamColor);
+        if (stepMode && closestPt) showDetSpot(closestPt);
         // Record one entry per detecting sensor; dist = range to target centre
         detEvents.push({ t: simTime, dist: curRange, sensor: si + 1 });
         if (detEvents.length > 400) detEvents.shift();
@@ -1105,6 +1132,14 @@ function simStep(dt) {
       totalDet++; detFrames++;
       if (firstDetT === null) firstDetT = simTime;
       lastDetectedFlag = true;
+      if (El('chk-step').checked) {
+        pulseClock = 0; // don't fire more pulses this frame
+        simRunning = false;
+        stepPaused = true;
+        El('btn-next').style.display = '';
+        El('btn-ss').textContent = '⏸  PAUSED — DETECTION';
+        break; // exit while loop
+      }
     }
     prevAnyDetected = anyDetected;
     if (anyRodBlocked) lastRodBlockedFlag = true;
@@ -1454,13 +1489,26 @@ El('btn-ss').addEventListener('click', () => {
 });
 
 El('btn-rst').addEventListener('click', () => {
-  simRunning = false;
+  simRunning = false; stepPaused = false;
   loopCount = 0;
   El('m-loop').textContent  = '0';
   El('btn-ss').textContent  = '▶  START SIMULATION';
   El('btn-ss').className    = 'cbtn';
   El('d-sim').className     = 'dot';
+  El('btn-next').style.display = 'none';
+  clearDetSpot();
   resetSim();
+});
+
+El('btn-next').addEventListener('click', () => {
+  if (!stepPaused) return;
+  clearDetSpot();
+  stepPaused = false;
+  simRunning = true;
+  lastT = null;
+  El('btn-ss').textContent = '⏸  PAUSE';
+  El('btn-ss').className   = 'cbtn running';
+  El('btn-next').style.display = 'none';
 });
 
 // ═══════════════════════════════════════════════════════
