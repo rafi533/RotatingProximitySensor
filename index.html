@@ -1095,8 +1095,8 @@ function simStep(dt) {
         anyDetected = true;
         if (closestPt) addDetRay(origin, closestPt);
         updatePulseBeam(origin, boresight, P('sl-rng'));
-        // Record one entry per detecting sensor
-        detEvents.push({ t: simTime, dist: closestDist ?? curRange, sensor: si + 1 });
+        // Record one entry per detecting sensor; dist = range to target centre
+        detEvents.push({ t: simTime, dist: curRange, sensor: si + 1 });
         if (detEvents.length > 400) detEvents.shift();
       }
       if (rodBlocked) anyRodBlocked = true;
