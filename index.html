@@ -461,7 +461,7 @@ let groundTex = null, groundMesh = null;
   groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
   groundTex.repeat.set(20, 20); // tile = 20 m on a 400 m plane
 
-  const geo = new THREE.PlaneGeometry(400, 400);
+  const geo = new THREE.PlaneGeometry(4000, 4000);
   const mat = new THREE.MeshBasicMaterial({ map: groundTex, transparent: true, opacity: 0.85, depthWrite: false });
   groundMesh = new THREE.Mesh(geo, mat);
   groundMesh.rotation.x = -Math.PI / 2;
