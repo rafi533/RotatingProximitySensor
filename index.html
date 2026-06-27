@@ -613,13 +613,13 @@ function buildOneFovCone(pivotGroup) {
   geo.setAttribute('color', cAttr);
   geo.setIndex(idx);
   const coneMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-    vertexColors: true, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false
+    vertexColors: true, transparent: true, opacity: 0.35, side: THREE.FrontSide, depthWrite: false
   }));
   pivotGroup.add(coneMesh);
   const rimGeo = new THREE.RingGeometry(r * 0.95, r * 1.05, N_FOV_SECTORS);
   rimGeo.rotateX(Math.PI / 2);
   const rimMesh = new THREE.Mesh(rimGeo, new THREE.MeshBasicMaterial({
-    color: 0x00c8ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false
+    color: 0x00c8ff, transparent: true, opacity: 0.35, side: THREE.FrontSide, depthWrite: false
   }));
   rimMesh.position.z = SZ / 2 + L;
   pivotGroup.add(rimMesh);
@@ -780,7 +780,7 @@ function buildSweptVolume() {
 
   const mat = new THREE.MeshBasicMaterial({
     color: 0x0080ff, transparent: true, opacity: 0.05,
-    side: THREE.DoubleSide, depthWrite: false
+    side: THREE.FrontSide, depthWrite: false
   });
   sweptMesh = new THREE.Mesh(geo, mat);
   sweptMesh.position.z = 1.0; // sensor Z in interceptorGroup local space
