@@ -136,13 +136,13 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
     <div class="ptitle">Sensor (4×2×6 cm)</div>
     <div class="row">
       <span class="lbl">Mount angle X<br><span style="font-size:9px;color:#3d6080">(from flight axis)</span></span>
-      <input type="range" id="sl-x" min="10" max="80" step="1" value="13">
-      <span class="val" id="vl-x">13</span><span class="unit">deg</span>
+      <input type="range" id="sl-x" min="10" max="80" step="1" value="10">
+      <span class="val" id="vl-x">10</span><span class="unit">deg</span>
     </div>
     <div class="row">
       <span class="lbl">No. of lidars</span>
-      <input type="range" id="sl-nl" min="1" max="8" step="1" value="1">
-      <span class="val" id="vl-nl">1</span><span class="unit"></span>
+      <input type="range" id="sl-nl" min="1" max="8" step="1" value="4">
+      <span class="val" id="vl-nl">4</span><span class="unit"></span>
     </div>
     <div class="row">
       <span class="lbl">Sensor FOV (D)<br><span style="font-size:9px;color:#3d6080">(full cone angle)</span></span>
@@ -151,8 +151,8 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
     </div>
     <div class="row">
       <span class="lbl">Max range</span>
-      <input type="range" id="sl-rng" min="5" max="200" step="5" value="35">
-      <span class="val" id="vl-rng">35</span><span class="unit">m</span>
+      <input type="range" id="sl-rng" min="5" max="200" step="5" value="200">
+      <span class="val" id="vl-rng">200</span><span class="unit">m</span>
     </div>
     <div style="margin-top:2px; font-size:9px; color:#3d6080;">
       Detection cone: <span id="info-cone" style="color:#29b6f6">—</span>
@@ -164,13 +164,13 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
     <div class="ptitle">Rotation (Stage 2)</div>
     <div class="row">
       <span class="lbl">Spin rate</span>
-      <input type="range" id="sl-rpm" min="100" max="6000" step="50" value="1500">
-      <span class="val" id="vl-rpm">1500</span><span class="unit">RPM</span>
+      <input type="range" id="sl-rpm" min="100" max="6000" step="50" value="100">
+      <span class="val" id="vl-rpm">100</span><span class="unit">RPM</span>
     </div>
     <div class="row">
       <span class="lbl">Sample rate</span>
-      <input type="range" id="sl-srate" min="10" max="10000" step="10" value="300">
-      <span class="val" id="vl-srate">300</span><span class="unit">Hz</span>
+      <input type="range" id="sl-srate" min="10" max="10000" step="10" value="980">
+      <span class="val" id="vl-srate">980</span><span class="unit">Hz</span>
     </div>
     <div class="row">
       <span class="lbl">Mount offset φ<br><span style="font-size:9px;color:#3d6080">(azimuth at t=0)</span></span>
@@ -239,18 +239,18 @@ select { width: 100%; background: #0f1820; border: 1px solid #1a3050; color: #c0
     <div class="ptitle">Target</div>
     <div class="row">
       <span class="lbl">Width (Y)</span>
-      <input type="range" id="sl-tw" min="0.2" max="20" step="0.2" value="5">
-      <span class="val" id="vl-tw">5.0</span><span class="unit">m</span>
+      <input type="range" id="sl-tw" min="0.2" max="20" step="0.2" value="2.2">
+      <span class="val" id="vl-tw">2.2</span><span class="unit">m</span>
     </div>
     <div class="row">
       <span class="lbl">Height (Z)</span>
-      <input type="range" id="sl-th" min="0.2" max="20" step="0.2" value="3">
-      <span class="val" id="vl-th">3.0</span><span class="unit">m</span>
+      <input type="range" id="sl-th" min="0.2" max="20" step="0.2" value="0.6">
+      <span class="val" id="vl-th">0.6</span><span class="unit">m</span>
     </div>
     <div class="row">
       <span class="lbl">Depth (X)</span>
-      <input type="range" id="sl-td" min="0.2" max="30" step="0.5" value="8">
-      <span class="val" id="vl-td">8.0</span><span class="unit">m</span>
+      <input type="range" id="sl-td" min="0.2" max="30" step="0.5" value="2.2">
+      <span class="val" id="vl-td">2.2</span><span class="unit">m</span>
     </div>
     <div class="row">
       <span class="lbl">Speed</span>
